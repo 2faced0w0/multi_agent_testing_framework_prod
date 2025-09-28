@@ -4,6 +4,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import systemRoutes from './routes/system';
 import testExecutionsRoutes from './routes/test-executions';
+import webhookRoutes, { rawBodySaver } from './routes/webhooks';
 import { metrics } from '../monitoring/Metrics';
 
 const app = express();
@@ -46,12 +47,13 @@ if (process.env.RATE_LIMIT_ENABLED === 'true') {
     })
   );
 }
-app.use(express.json());
+app.use(express.json({ verify: rawBodySaver }));
 app.use(morgan('dev'));
 
 // Mount routes
 app.use('/api/v1/system', systemRoutes);
 app.use('/api/v1/tests/executions', testExecutionsRoutes);
+app.use('/api/v1/webhooks', webhookRoutes);
 
 // Prometheus metrics exposition
 app.get('/metrics', (_req, res) => {
