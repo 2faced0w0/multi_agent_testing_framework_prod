@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 import { ExecutionReportRepository } from '@database/repositories/ExecutionReportRepository';
+import { metrics } from '@monitoring/Metrics';
 
 export type TestExecutorAgentConfig = BaseAgentConfig & {
   execution: {
@@ -107,6 +108,12 @@ export class TestExecutorAgent extends BaseAgent {
 
     // Publish event
     await this.publishEvent('execution.completed', { id: execId, status, reportPath, summary });
+
+    // Metrics
+    try {
+      metrics.inc('tests_executed_total');
+      if (status !== 'passed') metrics.inc('generation_failures_total');
+    } catch {}
   }
 }
 

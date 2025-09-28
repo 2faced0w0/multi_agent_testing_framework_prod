@@ -3,6 +3,9 @@ class MetricsRegistry {
   inc(name: string, value = 1) {
     this.counters[name] = (this.counters[name] || 0) + value;
   }
+  set(name: string, value: number) {
+    this.counters[name] = value;
+  }
   toText(): string {
     const lines: string[] = [];
     // Include a basic self metric so output is never empty

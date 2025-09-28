@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 import { GeneratedTestRepository } from '@database/repositories/GeneratedTestRepository';
+import { metrics } from '@monitoring/Metrics';
 
 export type TestWriterAgentConfig = BaseAgentConfig & {
   mistral: {
@@ -94,6 +95,9 @@ export class TestWriterAgent extends BaseAgent {
     } catch (err) {
       this.log('debug', 'Skipping publishEvent; EventBus not initialized', { error: (err as Error)?.message });
     }
+
+    // Metrics
+    try { metrics.inc('tests_generated_total'); } catch {}
   }
 
   private renderBasicPlaywrightTest(title: string): string {
