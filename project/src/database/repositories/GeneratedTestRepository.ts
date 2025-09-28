@@ -17,7 +17,7 @@ export class GeneratedTestRepository {
 
   async create(row: GeneratedTestRow) {
     await this.db.run(
-      `INSERT INTO generated_tests (id, repo, branch, commit, path, title, created_at, created_by, metadata)
+      `INSERT INTO generated_tests (id, repo, branch, commit_sha, path, title, created_at, created_by, metadata)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.id,
       row.repo,

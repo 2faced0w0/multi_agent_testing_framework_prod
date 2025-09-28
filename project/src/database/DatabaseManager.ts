@@ -42,7 +42,7 @@ export class DatabaseManager {
       id TEXT PRIMARY KEY,
       repo TEXT,
       branch TEXT,
-      commit TEXT,
+      commit_sha TEXT,
       path TEXT,
       title TEXT,
       created_at TEXT,

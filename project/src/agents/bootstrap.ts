@@ -3,6 +3,7 @@ import { createClient, type RedisClientType } from 'redis';
 import { loadConfig } from '@api/config';
 import { TestWriterAgent, type TestWriterAgentConfig } from './test-writer/TestWriterAgent';
 import { LocatorSynthesisAgent, type LocatorSynthesisAgentConfig } from './locator-synthesis/LocatorSynthesisAgent';
+import { TestExecutorAgent, type TestExecutorAgentConfig } from './test-executor/TestExecutorAgent';
 import type BaseAgent from './base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 
@@ -84,6 +85,20 @@ async function main(): Promise<void> {
   };
   const locatorAgent = new LocatorSynthesisAgent(locatorCfg);
   agents.set('LocatorSynthesis', locatorAgent);
+
+  const execCfg: TestExecutorAgentConfig = {
+    ...baseAgentCfg,
+    agentType: 'TestExecutor',
+    execution: {
+      mode: (process.env.TE_MODE as any) || 'simulate',
+      timeoutMs: parseInt(process.env.TE_TIMEOUT_MS || '60000', 10),
+      reportDir: process.env.TE_REPORT_DIR || 'test_execution_reports',
+      testsDir: process.env.TE_TESTS_DIR || 'generated_tests',
+      defaultBrowser: (process.env.TE_DEFAULT_BROWSER as any) || 'chromium',
+    },
+  };
+  const testExecutor = new TestExecutorAgent(execCfg);
+  agents.set('TestExecutor', testExecutor);
 
   // Initialize all agents
   await Promise.all(Array.from(agents.values()).map((a) => a.initialize()));
