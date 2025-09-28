@@ -1,16 +1,12 @@
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { 
-  AgentIdentifier, 
-  AgentMessage, 
-  SystemEvent
-} from '../../types/communication';
-import { HealthStatus } from '../../types/common';
-import { MessageQueue } from '../../communication/MessageQueue';
-import { EventBus } from '../../communication/EventBus';
-import { SharedMemory } from '../../communication/SharedMemory';
-import { DatabaseManager } from '../../database/DatabaseManager';
-import { acquireGlobalDatabase, releaseGlobalDatabase } from '../../database/GlobalDatabase';
+import { AgentIdentifier, AgentMessage, SystemEvent } from '@app-types/communication';
+type HealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'offline';
+import { MessageQueue } from '@communication/MessageQueue';
+import { EventBus } from '@communication/EventBus';
+import { SharedMemory } from '@communication/SharedMemory';
+import { DatabaseManager } from '@database/DatabaseManager';
+import { acquireGlobalDatabase, releaseGlobalDatabase } from '@database/GlobalDatabase';
 
 /**
  * Configuration interface for BaseAgent

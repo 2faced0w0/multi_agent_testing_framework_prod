@@ -3,6 +3,8 @@ import { MessageQueue } from '@communication/MessageQueue';
 import { EventBus } from '@communication/EventBus';
 import path from 'path';
 import { maybeAuth, maybeRequireRole } from '@api/middleware/auth';
+import { getGlobalDatabase, acquireGlobalDatabase } from '@database/GlobalDatabase';
+import { loadConfig } from '@api/config';
 
 const router = Router();
 
@@ -21,14 +23,7 @@ router.get('/health', async (_req: Request, res: Response) => {
 // Additional endpoint for messaging health and stats
 router.get('/messaging', maybeAuth, maybeRequireRole(['admin', 'ops']), async (_req: Request, res: Response) => {
   try {
-    const env = process.env.NODE_ENV === 'production' ? 'production' : 'development';
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const config = require(path.resolve(process.cwd(), 'config', `${env}.json`));
-    // Inject Redis overrides from env for secured deployments
-    if (process.env.REDIS_PASSWORD) {
-      config.messageQueue.redis.password = process.env.REDIS_PASSWORD;
-      config.eventBus.redis.password = process.env.REDIS_PASSWORD;
-    }
+    const config = loadConfig();
 
     const mq = new MessageQueue(config.messageQueue);
     await mq.initialize();
@@ -49,12 +44,9 @@ router.get('/messaging', maybeAuth, maybeRequireRole(['admin', 'ops']), async (_
 // Queue metrics (DB-backed) and event counters
 router.get('/metrics/queues', maybeAuth, maybeRequireRole(['admin', 'ops', 'viewer']), async (_req: Request, res: Response) => {
   try {
-    const env = process.env.NODE_ENV === 'production' ? 'production' : 'development';
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const config = require(path.resolve(process.cwd(), 'config', `${env}.json`));
+  const config = loadConfig();
 
     // Prefer global DB if available
-    const { getGlobalDatabase, acquireGlobalDatabase } = require('@database/GlobalDatabase');
     let dbm = getGlobalDatabase();
     if (!dbm) {
       dbm = acquireGlobalDatabase(config.database);
@@ -110,12 +102,9 @@ router.get('/metrics/queues', maybeAuth, maybeRequireRole(['admin', 'ops', 'view
 // Recent system events endpoint
 router.get('/events', maybeAuth, maybeRequireRole(['admin', 'ops', 'viewer']), async (req: Request, res: Response) => {
   try {
-    const env = process.env.NODE_ENV === 'production' ? 'production' : 'development';
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const config = require(path.resolve(process.cwd(), 'config', `${env}.json`));
+  const config = loadConfig();
 
     // Prefer global DB if available to avoid separate connections during tests
-    const { getGlobalDatabase, acquireGlobalDatabase } = require('@database/GlobalDatabase');
     let dbm = getGlobalDatabase();
     if (!dbm) {
       dbm = acquireGlobalDatabase(config.database);

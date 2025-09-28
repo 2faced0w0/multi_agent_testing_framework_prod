@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: matf-service
+spec:
+  selector:
+    app: matf
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+    - name: ws
+      port: 3001
+      targetPort: 3001
+  type: ClusterIP

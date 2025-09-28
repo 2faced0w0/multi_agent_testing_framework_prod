@@ -3,24 +3,17 @@ import { v4 as uuidv4 } from 'uuid';
 import { ensureDatabaseInitialized, getDatabaseManager } from '@api/context';
 import { TestExecutionRepository } from '@database/repositories/TestExecutionRepository';
 import { MessageQueue } from '@communication/MessageQueue';
-import { AgentMessage, AgentIdentifier, MessagePriority } from '@/types/communication';
-import { ExecutionStatus } from '@/types/common';
+import { AgentMessage, AgentIdentifier } from '@app-types/communication';
+type MessagePriority = 'low' | 'normal' | 'high' | 'critical';
+type ExecutionStatus = 'queued' | 'running' | 'passed' | 'failed' | 'canceled';
 
 // Load MQ config similarly to DatabaseManager via config json
 import path from 'path';
 import type { MessageQueueConfig } from '@communication/MessageQueue';
+import { loadConfig } from '@api/config';
 
 function loadMqConfig(): MessageQueueConfig {
-  const env = process.env.NODE_ENV === 'production' ? 'production' : 'development';
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const config = require(path.resolve(process.cwd(), 'config', `${env}.json`));
-  const mq: MessageQueueConfig = config.messageQueue;
-  // Allow securing Redis via env at runtime
-  if (process.env.REDIS_HOST) mq.redis.host = process.env.REDIS_HOST;
-  if (process.env.REDIS_PORT) mq.redis.port = parseInt(process.env.REDIS_PORT, 10);
-  if (process.env.REDIS_DB) mq.redis.db = parseInt(process.env.REDIS_DB, 10);
-  if (process.env.REDIS_PASSWORD) (mq.redis as any).password = process.env.REDIS_PASSWORD;
-  return mq;
+  return loadConfig().messageQueue;
 }
 
 const router = Router();
@@ -116,13 +109,8 @@ router.post('/', async (req: Request, res: Response) => {
         },
         metadata: {}
       },
-      schema: '1.0.0',
-      timestamp: new Date(),
-      priority: (priority as MessagePriority) || 'normal',
-      deliveryMode: 'at_least_once',
-      retryPolicy: { maxRetries: 3, retryDelay: 1000, backoffMultiplier: 2 },
-      retryCount: 0,
-      encrypted: false
+  timestamp: new Date(),
+  priority: (priority as MessagePriority) || 'normal'
     };
     await mq.sendMessage(message);
     await mq.close();

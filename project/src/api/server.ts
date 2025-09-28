@@ -3,9 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
 import systemRoutes from './routes/system';
-import testCasesRoutes from './routes/test-cases';
 import testExecutionsRoutes from './routes/test-executions';
-import agentMessagesRoutes from './routes/agent-messages';
 import { metrics } from '../monitoring/Metrics';
 
 const app = express();
@@ -53,9 +51,7 @@ app.use(morgan('dev'));
 
 // Mount routes
 app.use('/api/v1/system', systemRoutes);
-app.use('/api/v1/tests/cases', testCasesRoutes);
 app.use('/api/v1/tests/executions', testExecutionsRoutes);
-app.use('/api/v1/agent-messages', agentMessagesRoutes);
 
 // Prometheus metrics exposition
 app.get('/metrics', (_req, res) => {

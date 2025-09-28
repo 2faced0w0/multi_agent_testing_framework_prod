@@ -19,11 +19,13 @@ services:
     depends_on:
       - redis
     ports:
-      - "3000:3000"
+      - "3005:3000" # avoid host port 3000 conflict
       - "3001:3001"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./generated_tests:/app/generated_tests
+      - ./test_execution_reports:/app/test_execution_reports
   prometheus:
     image: prom/prometheus:v2.54.0
     restart: unless-stopped

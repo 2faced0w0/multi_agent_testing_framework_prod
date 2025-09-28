@@ -29,7 +29,7 @@ This guide provides comprehensive instructions for deploying, configuring, and o
 - **On-Premises**: Self-hosted infrastructure deployment
 
 ### Architecture Overview
-The framework consists of six specialized agents communicating through Redis-based messaging, with Playwright for browser automation, Mistral AI for intelligent test generation, and comprehensive monitoring through Prometheus/Grafana.
+The framework consists of six specialized agents communicating through Redis-based messaging, with Playwright for browser automation, GPT-4 for intelligent test generation, and comprehensive monitoring through Prometheus/Grafana.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -50,7 +50,7 @@ The framework consists of six specialized agents communicating through Redis-bas
 ├─────────────────────────────────────────────────────────────────┤
 │  Infrastructure Services                                        │
 │  ├── Redis Cluster (Message Queue/Cache)                       │
-│  ├── SQLite (Data Storage)                                     │
+│  ├── SQLite/PostgreSQL (Data Storage)                          │
 │  ├── InfluxDB (Time-series Metrics)                           │
 │  └── File Storage (Artifacts/Reports)                          │
 ├─────────────────────────────────────────────────────────────────┤
@@ -125,8 +125,9 @@ libgtk-3-0, libgbm-dev, libasound2-dev (Ubuntu)
 # Redis (message queue and cache)
 Redis >= 7.0.0
 
-# SQLite (primary datastore)
+# SQLite (development) or PostgreSQL (production)
 SQLite >= 3.40.0
+PostgreSQL >= 14.0 (production)
 
 # InfluxDB (time-series metrics)
 InfluxDB >= 2.7.0
@@ -270,9 +271,9 @@ INFLUXDB_URL=http://localhost:8086
 INFLUXDB_TOKEN=your_influxdb_token
 
 # External Service Configuration
-MISTRAL_API_KEY=your_mistral_api_key
-MISTRAL_MODEL=mistral-large-latest
-MISTRAL_MAX_TOKENS=4000
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-4
+OPENAI_MAX_TOKENS=4000
 
 # Security Configuration
 JWT_SECRET=your_jwt_secret_key
@@ -399,8 +400,8 @@ ENABLE_API_TESTING=true
       "retries": 2,
       "workers": 4
     },
-    "mistral": {
-      "model": "mistral-large-latest",
+    "openai": {
+      "model": "gpt-4",
       "maxTokens": 4000,
       "temperature": 0.1,
       "rateLimitRpm": 60,
@@ -541,7 +542,38 @@ mkdir -p /opt/multi-agent-testing/data/sqlite
 sqlite3 /opt/multi-agent-testing/data/sqlite/framework.db < scripts/schema.sql
 ```
 
-<!-- PostgreSQL setup section removed; SQLite is the standard datastore for this project. -->
+#### PostgreSQL Setup (Production)
+```bash
+# Install PostgreSQL
+sudo apt install -y postgresql postgresql-contrib
+
+# Create database and user
+sudo -u postgres psql << EOF
+CREATE DATABASE multi_agent_testing;
+CREATE USER framework_user WITH ENCRYPTED PASSWORD 'your_secure_password';
+GRANT ALL PRIVILEGES ON DATABASE multi_agent_testing TO framework_user;
+\q
+EOF
+
+# Configure PostgreSQL
+sudo tee -a /etc/postgresql/14/main/postgresql.conf << EOF
+# Performance tuning
+shared_buffers = 256MB
+effective_cache_size = 1GB
+maintenance_work_mem = 64MB
+checkpoint_completion_target = 0.9
+wal_buffers = 16MB
+default_statistics_target = 100
+random_page_cost = 1.1
+effective_io_concurrency = 200
+work_mem = 4MB
+min_wal_size = 1GB
+max_wal_size = 4GB
+EOF
+
+# Restart PostgreSQL
+sudo systemctl restart postgresql
+```
 
 ### 5. Service Installation
 
@@ -551,7 +583,7 @@ sqlite3 /opt/multi-agent-testing/data/sqlite/framework.db < scripts/schema.sql
 sudo tee /etc/systemd/system/multi-agent-testing.service << EOF
 [Unit]
 Description=Multi-Agent Testing Framework
-After=network.target redis.service
+After=network.target redis.service postgresql.service
 Wants=redis.service
 
 [Service]
@@ -931,13 +963,14 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=sqlite:///data/framework.db
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - DATABASE_URL=postgresql://framework_user:${DB_PASSWORD}@postgres:5432/multi_agent_testing
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
     depends_on:
       redis:
         condition: service_healthy
-      # postgres removed
+      postgres:
+        condition: service_healthy
     volumes:
       - framework_data:/app/data
       - framework_logs:/app/logs
@@ -967,7 +1000,25 @@ services:
       timeout: 3s
       retries: 5
 
-  # postgres service removed; SQLite is used as the datastore
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=multi_agent_testing
+      - POSTGRES_USER=framework_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - multi-agent-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U framework_user -d multi_agent_testing"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   prometheus:
     image: prom/prometheus:v2.47.0
@@ -1014,6 +1065,7 @@ volumes:
   framework_data:
   framework_logs:
   redis_data:
+  postgres_data:
   prometheus_data:
   grafana_data:
 ```
@@ -1173,58 +1225,63 @@ groups:
 ### AlertManager Configuration
 
 ```yaml
-# monitoring/alertmanager.yml (production-ready template)
+# monitoring/alertmanager.yml
 global:
-  resolve_timeout: 5m
-  smtp_smarthost: 'localhost:25'
-  smtp_from: 'alerts@example.com'
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alerts@your-domain.com'
+  slack_api_url: 'YOUR_SLACK_WEBHOOK_URL'
 
 route:
-  receiver: 'default'
   group_by: ['alertname', 'cluster', 'service']
   group_wait: 10s
-  group_interval: 2m
-  repeat_interval: 2h
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'default'
   routes:
-    - matchers: [ 'severity="critical"' ]
+    - match:
+        severity: critical
       receiver: 'critical-alerts'
-    - matchers: [ 'severity="warning"' ]
+    - match:
+        severity: warning
       receiver: 'warning-alerts'
 
 receivers:
   - name: 'default'
-    webhook_configs:
-      - url: 'http://127.0.0.1:12345/'
-        send_resolved: true
+    slack_configs:
+      - channel: '#alerts'
+        title: 'Multi-Agent Testing Framework Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}: {{ .Annotations.description }}{{ end }}'
 
   - name: 'critical-alerts'
     email_configs:
-      - to: 'ops-team@example.com'
-        send_resolved: true
+      - to: 'ops-team@your-domain.com'
+        subject: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Labels: {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}
+          {{ end }}
     slack_configs:
       - channel: '#critical-alerts'
-        send_resolved: true
-        title: 'CRITICAL: {{ .CommonAnnotations.summary }}'
-        text: '{{ range .Alerts }}• {{ .Annotations.description }}{{ "\n" }}{{ end }}'
-        api_url_file: '/etc/alertmanager/slack_api_url'
+        title: 'CRITICAL ALERT'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}: {{ .Annotations.description }}{{ end }}'
+        color: 'danger'
 
   - name: 'warning-alerts'
     slack_configs:
       - channel: '#alerts'
-        send_resolved: true
-        title: 'Warning: {{ .CommonAnnotations.summary }}'
-        text: '{{ range .Alerts }}• {{ .Annotations.description }}{{ "\n" }}{{ end }}'
-        api_url_file: '/etc/alertmanager/slack_api_url'
+        title: 'Warning Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}: {{ .Annotations.description }}{{ end }}'
+        color: 'warning'
 
 inhibit_rules:
-  - source_matchers: [ 'severity="critical"' ]
-    target_matchers: [ 'severity="warning"' ]
-    equal: ['alertname', 'service']
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'service']
 ```
-
-Kubernetes secret for Slack webhook (template): `project/k8s/alertmanager-secret.example.yaml`
-
-Mount the secret into Alertmanager container (Compose or K8s) so `/etc/alertmanager/slack_api_url` exists. For Compose, bind-mount the file or use `env_file`. For K8s, create a Secret and mount it as a volume at `/etc/alertmanager`.
 
 ### Grafana Dashboard Configuration
 
@@ -1345,78 +1402,6 @@ Mount the secret into Alertmanager container (Compose or K8s) so `/etc/alertmana
 ---
 
 ## Backup & Recovery Procedures
-
-### Kubernetes: SQLite automated backups
-
-For Kubernetes deployments using the default SQLite datastore at `/app/data/framework.db`, a CronJob is provided to create time-stamped copies into a dedicated backup PVC.
-
-- Manifest: `project/k8s/backup-cronjob.yaml`
-- Schedule: daily at 02:30
-- Source PVC: `matf-data` mounted at `/data`
-- Backup PVC: `matf-backups` mounted at `/backup` (5Gi by default)
-- Retention: keeps the 14 most recent copies (FIFO cleanup)
-
-Deploy the CronJob and backup PVC:
-
-1) Create the backup PVC and CronJob
-   kubectl apply -f project/k8s/backup-cronjob.yaml
-
-2) Verify
-   kubectl get cronjob matf-sqlite-backup
-   kubectl get pvc matf-backups
-
-3) Inspect backup artifacts (file names like `framework-YYYYMMDD-HHMMSS.db`)
-   kubectl -n <ns> get pods  # find a pod with the backup PVC mounted, or start a temporary pod
-   kubectl -n <ns> exec -it <pod> -- ls -1 /backup
-
-Manual run (on-demand):
-   kubectl create job --from=cronjob/matf-sqlite-backup manual-sqlite-backup-$(date +%s)
-
-Restore (Kubernetes):
-- Safest path is to scale down the application to avoid writes, copy a chosen backup file over the live DB, then scale back up.
-
-   # Scale down app
-   kubectl scale deploy/multi-agent-testing-framework --replicas=0
-
-   # Start a debug pod with both PVCs mounted to perform the copy
-   kubectl apply -f - <<EOF
-   apiVersion: v1
-   kind: Pod
-   metadata:
-     name: restore-sqlite-once
-   spec:
-     restartPolicy: Never
-     containers:
-       - name: busybox
-         image: alpine:3.20
-         command: ["/bin/sh","-c","sleep 3600"]
-         volumeMounts:
-           - name: data
-             mountPath: /data
-           - name: backup
-             mountPath: /backup
-     volumes:
-       - name: data
-         persistentVolumeClaim:
-           claimName: matf-data
-       - name: backup
-         persistentVolumeClaim:
-           claimName: matf-backups
-   EOF
-
-   # After the pod is Running, copy the selected backup over the live DB
-   kubectl exec -it restore-sqlite-once -- /bin/sh -lc "cp -f /backup/<your-backup-file>.db /data/framework.db && sync"
-
-   # Remove the restore pod
-   kubectl delete pod restore-sqlite-once --wait=true
-
-   # Scale the app back up
-   kubectl scale deploy/multi-agent-testing-framework --replicas=1
-
-Notes:
-- Ensure the app is fully quiesced (scaled to 0) before replacing the DB file to avoid corruption.
-- Increase the `matf-backups` PVC size or adjust retention as data grows.
-- Consider off-cluster copy (e.g., to object storage) by extending the CronJob to upload backups.
 
 ### Automated Backup Script
 
@@ -3539,7 +3524,7 @@ echo "API endpoint: http://localhost:3000"
 echo "Health check: http://localhost:3000/health"
 echo
 echo "Next steps:"
-echo "1. Configure your Mistral API key in $INSTALL_DIR/.env"
+echo "1. Configure your OpenAI API key in $INSTALL_DIR/.env"
 echo "2. Review configuration in $INSTALL_DIR/config/"
 echo "3. Access the API documentation at http://localhost:3000/docs"
 echo
@@ -3569,8 +3554,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=sqlite:///data/framework.db
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - DATABASE_URL=postgresql://framework_user:${DB_PASSWORD}@postgres:5432/multi_agent_testing
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
     volumes:
@@ -3581,6 +3566,8 @@ services:
       - multi-agent-network
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -3629,7 +3616,28 @@ services:
           cpus: '1.0'
           memory: 2G
 
-  # Postgres service removed in favor of SQLite datastore
+  postgres:
+    image: postgres:15-alpine
+    container_name: multi-agent-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=multi_agent_testing
+      - POSTGRES_USER=framework_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf
+    networks:
+      - multi-agent-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U framework_user -d multi_agent_testing"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:

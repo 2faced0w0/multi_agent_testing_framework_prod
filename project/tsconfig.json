@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "baseUrl": "src",
+    "paths": {
+      "@communication/*": ["communication/*"],
+      "@database/*": ["database/*"],
+      "@api/*": ["api/*"],
+      "@app-types/*": ["types/*"],
+      "@monitoring/*": ["monitoring/*"]
+    }
+  },
+  "include": ["src"]
+}
