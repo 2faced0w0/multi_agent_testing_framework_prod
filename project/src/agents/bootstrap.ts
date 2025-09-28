@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createClient, type RedisClientType } from 'redis';
 import { loadConfig } from '@api/config';
 import { TestWriterAgent, type TestWriterAgentConfig } from './test-writer/TestWriterAgent';
+import { LocatorSynthesisAgent, type LocatorSynthesisAgentConfig } from './locator-synthesis/LocatorSynthesisAgent';
 import type BaseAgent from './base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 
@@ -72,6 +73,17 @@ async function main(): Promise<void> {
 
   const agents = new Map<string, BaseAgent>();
   agents.set('TestWriter', testWriter);
+
+  const locatorCfg: LocatorSynthesisAgentConfig = {
+    ...baseAgentCfg,
+    agentType: 'LocatorSynthesis',
+    heuristics: {
+      preferDataTestId: process.env.LS_PREFER_DATA_TESTID !== 'false',
+      preferRoleSelectors: process.env.LS_PREFER_ROLE === 'true',
+    },
+  };
+  const locatorAgent = new LocatorSynthesisAgent(locatorCfg);
+  agents.set('LocatorSynthesis', locatorAgent);
 
   // Initialize all agents
   await Promise.all(Array.from(agents.values()).map((a) => a.initialize()));
