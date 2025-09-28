@@ -1,4 +1,9 @@
-import type { BaseAgentConfig } from '../base/BaseAgent';
+import fs from 'fs/promises';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
+import type { AgentMessage } from '@app-types/communication';
+import { GeneratedTestRepository } from '@database/repositories/GeneratedTestRepository';
 
 export type TestWriterAgentConfig = BaseAgentConfig & {
   mistral: {
@@ -22,5 +27,85 @@ export type TestWriterAgentConfig = BaseAgentConfig & {
   };
 };
 
-// Optional stub class to retain structure; not used in builds
-export class TestWriterAgent {}
+export class TestWriterAgent extends BaseAgent {
+  constructor(private twConfig: TestWriterAgentConfig) {
+    super(twConfig);
+  }
+
+  protected async onInitialize(): Promise<void> {
+    // No-op: DB will be initialized lazily in processMessage if needed
+  }
+
+  protected async onShutdown(): Promise<void> {
+    // No-op for MVP
+  }
+
+  protected getConfigSchema(): object {
+    return {
+      type: 'object',
+      properties: {
+        mistral: { type: 'object' },
+        testGeneration: { type: 'object' },
+        templates: { type: 'object' },
+      },
+    };
+  }
+
+  protected async processMessage(message: AgentMessage): Promise<void> {
+    if (message.messageType !== 'TEST_GENERATION_REQUEST') return;
+
+    const payload: any = message.payload || {};
+    const id = uuidv4();
+
+    // Compose basic Playwright test content as MVP (fallback when no Mistral)
+    const title = `Auto smoke: ${payload.repo || 'repo'} ${payload.branch || ''}`.trim();
+    const content = this.renderBasicPlaywrightTest(title);
+
+    // Ensure target directory exists
+    const outDir = path.resolve(process.cwd(), 'project', 'generated_tests');
+    await fs.mkdir(outDir, { recursive: true });
+    const filename = `${id}.spec.ts`;
+    const filePath = path.join(outDir, filename);
+    await fs.writeFile(filePath, content, 'utf8');
+
+    // Persist metadata (lazy DB init if needed)
+    try {
+      await this.database.initialize();
+      const repo = new GeneratedTestRepository(this.database.getDatabase());
+      await repo.create({
+        id,
+        repo: payload.repo || '',
+        branch: payload.branch || '',
+        commit: payload.headCommit || '',
+        path: `generated_tests/${filename}`,
+        title,
+        created_at: new Date().toISOString(),
+        created_by: this.agentId.type,
+        metadata: { compareUrl: payload.compareUrl || '', changedFiles: payload.changedFiles || [] },
+      });
+    } catch (err) {
+      // Log and continue; DB persistence is best-effort in MVP
+      this.log('warn', 'Failed to persist generated test metadata', { error: (err as Error)?.message });
+    }
+
+    // Publish a generation event (best-effort)
+    try {
+      await this.publishEvent('test.generated', { id, path: `generated_tests/${filename}`, title });
+    } catch (err) {
+      this.log('debug', 'Skipping publishEvent; EventBus not initialized', { error: (err as Error)?.message });
+    }
+  }
+
+  private renderBasicPlaywrightTest(title: string): string {
+    // Simple, stable TS Playwright test skeleton; can be replaced by Mistral results later
+    return `import { test, expect } from '@playwright/test';
+
+test('${title.replace(/'/g, "\'")}', async ({ page }) => {
+  await page.goto(process.env.E2E_BASE_URL || 'https://example.org');
+  await expect(page).toHaveTitle(/.*/);
+});
+`;
+  }
+}
+
+export default TestWriterAgent;
