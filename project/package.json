@@ -21,7 +21,8 @@
     "setup:dev": "npm install && npm run build",
     "start:services": "docker-compose up -d redis",
     "start:framework": "npm run build && npm start",
-    "start:agents": "node -e \"console.log('Agent bootstrap TODO: implement src/agents/bootstrap.ts');\""
+    "start:agents": "node -r module-alias/register dist/agents/bootstrap.js",
+    "dev:agents": "ts-node -r tsconfig-paths/register src/agents/bootstrap.ts"
   },
   "keywords": [
     "testing",
