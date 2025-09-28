@@ -1,0 +1,182 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-agent-testing-framework
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: matf
+  template:
+    metadata:
+      labels:
+        app: matf
+    spec:
+      serviceAccountName: matf-sa
+      # Uncomment if pulling from a private registry and create the secret accordingly
+      # imagePullSecrets:
+      #   - name: regcred
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: framework
+          image: ghcr.io/2faced0w0/multi_agent_testing_framework_prod:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: WS_PORT
+              value: "3001"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_DB
+              value: "0"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: matf-secrets
+                  key: redisPassword
+            - name: DATABASE_URL
+              value: "sqlite:///app/data/framework.db"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: matf-secrets
+                  key: jwtSecret
+            - name: MISTRAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: matf-secrets
+                  key: mistralApiKey
+          ports:
+            - containerPort: 3000
+            - containerPort: 3001
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          startupProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 3000
+            failureThreshold: 30
+            periodSeconds: 5
+          envFrom:
+            - configMapRef:
+                name: matf-config
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: matf-data
+        - name: logs
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: matf-sa
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: matf-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: matf-rolebinding
+subjects:
+  - kind: ServiceAccount
+    name: matf-sa
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: matf-role
+
+---
+# Optional: HorizontalPodAutoscaler (requires metrics-server)
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: multi-agent-testing-framework-hpa
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: multi-agent-testing-framework
+#   minReplicas: 1
+#   maxReplicas: 5
+#   metrics:
+#     - type: Resource
+#       resource:
+#         name: cpu
+#         target:
+#           type: Utilization
+#           averageUtilization: 70
+
+---
+# Optional: Ingress (adjust className/hosts/TLS)
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: matf-ingress
+#   annotations:
+#     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+# spec:
+#   ingressClassName: nginx
+#   tls:
+#     - hosts:
+#         - your-domain.example.com
+#       secretName: matf-tls
+#   rules:
+#     - host: your-domain.example.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: matf-service
+#                 port:
+#                   number: 3000

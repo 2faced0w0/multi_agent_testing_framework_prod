@@ -1,0 +1,30 @@
+groups:
+  - name: matf-general
+    interval: 30s
+    rules:
+      - alert: HighHTTPErrorRate
+        expr: sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: ">5% 5xx responses over 5m"
+
+      - alert: MessageQueueRetriesSpiking
+        expr: rate(message_queue_retries_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Message queue retries spiking"
+          description: "Retry rate > 1/sec over 10m"
+
+      - alert: AgentHealthErrors
+        expr: increase(agent_health_errors_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent health reported errors"
+          description: "At least one agent reported errors in the last 10m"

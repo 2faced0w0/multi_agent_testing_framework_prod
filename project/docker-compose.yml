@@ -1,0 +1,70 @@
+version: '3.8'
+services:
+  framework:
+    build: .
+    image: multi-agent-testing-framework:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      WS_PORT: 3001
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      DATABASE_URL: "sqlite:///app/data/framework.db"
+      JWT_SECRET: "${JWT_SECRET}"
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY}"
+    depends_on:
+      - redis
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    restart: unless-stopped
+    depends_on:
+      - framework
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+  grafana:
+    image: grafana/grafana:10.4.6
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "3002:3000" # expose Grafana on localhost:3002
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./docs/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docs/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+volumes:
+  redis_data:
