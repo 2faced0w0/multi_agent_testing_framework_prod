@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { loadConfig } from '@api/config';
 import { MessageQueue } from '@communication/MessageQueue';
 import type { AgentMessage } from '@app-types/communication';
-import { extractChangedFiles, hasUIChanges } from './webhooks_utils';
+import { extractChangedFiles, hasUIChanges } from '@api/routes/webhooks_utils';
 import { metrics } from '@monitoring/Metrics';
 
 const router = Router();
