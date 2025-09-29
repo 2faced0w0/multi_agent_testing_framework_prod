@@ -5,6 +5,7 @@ import { loadConfig } from '@api/config';
 import { MessageQueue } from '@communication/MessageQueue';
 import type { AgentMessage } from '@app-types/communication';
 import { extractChangedFiles, hasUIChanges } from './webhooks_utils';
+import { metrics } from '@monitoring/Metrics';
 
 const router = Router();
 
@@ -35,16 +36,41 @@ router.post('/github', async (req: Request, res: Response) => {
   const delivery = req.header('X-GitHub-Delivery') || uuidv4();
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
 
+  // Enforce JSON content-type
+  const contentType = (req.headers['content-type'] || '').toLowerCase();
+  if (!contentType.includes('application/json')) {
+    metrics.inc('webhook_invalid_content_type_total');
+    return res.status(415).json({ error: 'Unsupported Media Type' });
+  }
+
   if (!verifyGitHubSignature(req, secret)) {
+    metrics.inc('webhook_invalid_signature_total');
     return res.status(401).json({ error: 'Invalid signature' });
   }
 
   // Only handle push events for now
   if (event !== 'push') {
+    metrics.inc('webhook_ignored_event_total');
     return res.status(202).json({ status: 'ignored', event });
   }
 
   const payload: any = req.body || {};
+  // Basic schema checks
+  if (!payload.repository || !payload.ref || !payload.head_commit) {
+    metrics.inc('webhook_invalid_schema_total');
+    return res.status(400).json({ error: 'Invalid payload schema' });
+  }
+
+  // Optional repository allowlist
+  const allowedRepos = (process.env.ALLOWED_REPOS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const repoFullName = payload?.repository?.full_name || '';
+  if (allowedRepos.length > 0 && !allowedRepos.includes(repoFullName)) {
+    metrics.inc('webhook_repo_disallowed_total');
+    return res.status(403).json({ error: 'Repository not allowed' });
+  }
   const changedFiles = extractChangedFiles(payload);
   const uiChanged = hasUIChanges(changedFiles);
 
@@ -75,10 +101,12 @@ router.post('/github', async (req: Request, res: Response) => {
   try {
     await mq.initialize();
     await mq.sendMessage(msg);
+    metrics.inc('webhook_enqueue_success_total');
     await mq.close();
     return res.status(202).json({ status: 'queued', delivery, messageId: msg.id, files: changedFiles.length });
   } catch (err: any) {
     // Fail-open with acceptance so webhook retries don't hammer us
+    metrics.inc('webhook_enqueue_error_total');
     return res.status(202).json({ status: 'accepted-without-queue', delivery, error: err?.message });
   }
 });

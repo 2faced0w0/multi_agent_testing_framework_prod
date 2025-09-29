@@ -51,4 +51,8 @@ export class TestExecutionRepository {
       exec.executedBy
     );
   }
+
+  async updateStatus(id: string, status: string) {
+    await this.db.run(`UPDATE test_executions SET status = ? WHERE id = ?`, status, id);
+  }
 }

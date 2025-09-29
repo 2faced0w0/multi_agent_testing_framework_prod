@@ -1,5 +1,7 @@
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
+import { v4 as uuidv4 } from 'uuid';
+import { LocatorCandidatesRepository } from '@database/repositories/LocatorCandidatesRepository';
 
 export type LocatorSynthesisAgentConfig = BaseAgentConfig & {
   heuristics: {
@@ -36,6 +38,23 @@ export class LocatorSynthesisAgent extends BaseAgent {
 
     const payload: any = message.payload || {};
     const candidates = this.synthesize(payload.element || {}, payload.context || {});
+
+    // Persist candidates for auditability
+    try {
+      await this.database.initialize();
+      const repo = new LocatorCandidatesRepository(this.database.getDatabase());
+      await repo.create({
+        id: uuidv4(),
+        request_id: payload?.requestId || message.id,
+        element_description: JSON.stringify(payload.element || {}),
+        candidates,
+        chosen: candidates[0] || null,
+        created_at: new Date().toISOString(),
+        created_by: this.agentId.type,
+      });
+    } catch (e) {
+      this.log('warn', 'Failed to persist locator candidates', { error: (e as Error)?.message });
+    }
 
     // Respond by publishing an event (MVP). In the future we could reply via MQ.
     await this.publishEvent('locator.synthesis.completed', {

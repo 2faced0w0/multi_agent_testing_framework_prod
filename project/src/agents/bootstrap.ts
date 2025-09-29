@@ -4,8 +4,13 @@ import { loadConfig } from '@api/config';
 import { TestWriterAgent, type TestWriterAgentConfig } from './test-writer/TestWriterAgent';
 import { LocatorSynthesisAgent, type LocatorSynthesisAgentConfig } from './locator-synthesis/LocatorSynthesisAgent';
 import { TestExecutorAgent, type TestExecutorAgentConfig } from './test-executor/TestExecutorAgent';
+import { LoggerAgent, type LoggerAgentConfig } from './logger/LoggerAgent';
+import { TestOptimizerAgent, type TestOptimizerAgentConfig } from './test-optimizer/TestOptimizerAgent';
+import { ReportGeneratorAgent, type ReportGeneratorAgentConfig } from './report-generator/ReportGeneratorAgent';
+import { ContextManagerAgent, type ContextManagerAgentConfig } from './context-manager/ContextManagerAgent';
 import type BaseAgent from './base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
+import { MessageQueue, type MessageQueueConfig } from '@communication/MessageQueue';
 
 type ShutdownHandler = () => Promise<void> | void;
 
@@ -100,6 +105,38 @@ async function main(): Promise<void> {
   const testExecutor = new TestExecutorAgent(execCfg);
   agents.set('TestExecutor', testExecutor);
 
+  const loggerCfg: LoggerAgentConfig = {
+    ...baseAgentCfg,
+    agentType: 'Logger',
+    retentionDays: parseInt(process.env.LOG_RETENTION_DAYS || '14', 10)
+  } as any;
+  const loggerAgent = new LoggerAgent(loggerCfg);
+  agents.set('Logger', loggerAgent);
+
+  const optCfg: TestOptimizerAgentConfig = {
+    ...baseAgentCfg,
+    agentType: 'TestOptimizer',
+    analysis: { lookbackExecutions: parseInt(process.env.TO_LOOKBACK || '5', 10) }
+  } as any;
+  const optimizer = new TestOptimizerAgent(optCfg);
+  agents.set('TestOptimizer', optimizer);
+
+  const rgCfg: ReportGeneratorAgentConfig = {
+    ...baseAgentCfg,
+    agentType: 'ReportGenerator',
+    outputDir: process.env.RG_OUTPUT_DIR || 'test_execution_reports'
+  } as any;
+  const reportGen = new ReportGeneratorAgent(rgCfg);
+  agents.set('ReportGenerator', reportGen);
+
+  const cmCfg: ContextManagerAgentConfig = {
+    ...baseAgentCfg,
+    agentType: 'ContextManager',
+    namespace: process.env.CM_NAMESPACE || 'ctx'
+  } as any;
+  const contextMgr = new ContextManagerAgent(cmCfg);
+  agents.set('ContextManager', contextMgr);
+
   // Initialize all agents
   await Promise.all(Array.from(agents.values()).map((a) => a.initialize()));
 
@@ -126,55 +163,61 @@ async function main(): Promise<void> {
   console.log('[bootstrap] Agents running. Press Ctrl+C to exit.');
 }
 
-async function startQueueConsumer(mqCfg: import('@communication/MessageQueue').MessageQueueConfig, agentMap: Map<string, BaseAgent>) {
-  const url = `redis://${mqCfg.redis.host}:${mqCfg.redis.port}`;
-  const client: RedisClientType = createClient({ url, database: mqCfg.redis.db, password: mqCfg.redis.password });
-  await client.connect();
+async function startQueueConsumer(mqCfg: MessageQueueConfig, agentMap: Map<string, BaseAgent>) {
+  const mq = new MessageQueue(mqCfg);
+  await mq.initialize();
 
   let stopped = false;
-  const queueKey = mqCfg.queues.default;
-  const dlqKey = mqCfg.deadLetterQueue;
+  const maxConcurrency = Math.max(1, parseInt(process.env.AGENT_MAX_CONCURRENCY || '4', 10));
+  const inFlight = new Set<Promise<void>>();
 
-  const loop = (async () => {
+  const pump = async () => {
+    // keep filling up to maxConcurrency
     while (!stopped) {
       try {
-  const result = await client.blPop(queueKey, 5); // seconds
-  if (!result) continue; // timeout
-  const payload = result.element as string;
-        let msg: AgentMessage | null = null;
-        try {
-          msg = JSON.parse(payload) as AgentMessage;
-        } catch (e) {
-          console.error('[consumer] Invalid message, sending to DLQ:', (e as Error)?.message);
-          await client.lPush(dlqKey, payload);
+        if (inFlight.size >= maxConcurrency) {
+          await Promise.race(inFlight);
           continue;
         }
-
+        const msg = await mq.consumeNext();
+        if (!msg) continue; // timeout
         const targetType = msg.target?.type;
         const agentKey = normalizeTargetType(targetType || '');
         const agent = agentKey ? agentMap.get(agentKey) : undefined;
         if (!agent) {
-          console.warn(`[consumer] No agent for target ${targetType} (normalized: ${agentKey}), sending to DLQ`);
-          await client.lPush(dlqKey, JSON.stringify({
-            error: 'no-agent', original: msg,
-          }));
+          console.warn(`[consumer] No agent for target ${targetType} (normalized: ${agentKey}), failing message`);
+          await mq.failMessage(msg.id, msg);
           continue;
         }
-
-        await agent.handleIncomingMessage(msg);
+        const tracked = (async () => {
+          try {
+            await agent.handleIncomingMessage(msg);
+          } finally {
+            // no-op
+          }
+        })().finally(() => {
+          inFlight.delete(tracked);
+        });
+        inFlight.add(tracked);
       } catch (err) {
         console.error('[consumer] Error in loop:', (err as Error)?.message);
-        // brief backoff
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 250));
       }
     }
-  })();
+  };
+  const loop = pump();
 
   return {
     stop: async () => {
       stopped = true;
+      const drainMs = Math.max(0, parseInt(process.env.AGENT_SHUTDOWN_DRAIN_MS || '2000', 10));
+      const deadline = Date.now() + drainMs;
+      // Drain in-flight tasks up to deadline
+      while (inFlight.size > 0 && Date.now() < deadline) {
+        try { await Promise.race(inFlight); } catch { /* ignore */ }
+      }
       try { await loop; } catch { /* ignore */ }
-      await client.quit();
+      await mq.close();
     }
   };
 }
@@ -192,6 +235,18 @@ function normalizeTargetType(input: string): string | '' {
     case 'locatorsynthesis':
     case 'locatorsynthesisagent':
       return 'LocatorSynthesis';
+    case 'logger':
+    case 'loggeragent':
+      return 'Logger';
+    case 'testoptimizer':
+    case 'testoptimizeragent':
+      return 'TestOptimizer';
+    case 'reportgenerator':
+    case 'reportgeneratoragent':
+      return 'ReportGenerator';
+    case 'contextmanager':
+    case 'contextmanageragent':
+      return 'ContextManager';
     default:
       return input; // fallback to provided key
   }

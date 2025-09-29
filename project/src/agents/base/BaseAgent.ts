@@ -516,7 +516,12 @@ export abstract class BaseAgent extends EventEmitter {
       // Consider opening circuit breaker if too many failures
       this.evaluateCircuitBreaker();
       
-      // Don't acknowledge failed messages (they'll go to DLQ)
+      // Mark message as failed so MQ can retry or route to DLQ
+      try {
+        await this.messageQueue.failMessage(message.id, message);
+      } catch (failErr) {
+        this.log('error', 'Failed to mark message as failed in MQ', { messageId: message.id, error: (failErr as Error)?.message });
+      }
     }
   }
   

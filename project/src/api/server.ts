@@ -3,9 +3,12 @@ import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
 import systemRoutes from './routes/system';
+import testCasesRoutes from './routes/test-cases';
+import reportsRoutes from './routes/reports';
+import logsRoutes from './routes/logs';
 import testExecutionsRoutes from './routes/test-executions';
 import webhookRoutes, { rawBodySaver } from './routes/webhooks';
-import { metrics } from '../monitoring/Metrics';
+import { metrics } from '@monitoring/Metrics';
 
 const app = express();
 
@@ -52,6 +55,9 @@ app.use(morgan('dev'));
 
 // Mount routes
 app.use('/api/v1/system', systemRoutes);
+app.use('/api/v1/system', logsRoutes);
+app.use('/api/v1/reports', reportsRoutes);
+app.use('/api/v1/tests/cases', testCasesRoutes);
 app.use('/api/v1/tests/executions', testExecutionsRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 
