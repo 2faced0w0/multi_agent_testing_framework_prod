@@ -15,3 +15,19 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 2
+  - target:
+      kind: Deployment
+      name: multi-agent-testing-framework
+    patch: |
+      - op: add
+        path: /spec/template/spec/imagePullSecrets
+        value:
+          - name: ghcr-creds
+  - target:
+      kind: Deployment
+      name: matf-agents
+    patch: |
+      - op: add
+        path: /spec/template/spec/imagePullSecrets
+        value:
+          - name: ghcr-creds

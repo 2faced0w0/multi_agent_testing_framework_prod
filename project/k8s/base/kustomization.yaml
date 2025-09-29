@@ -9,3 +9,4 @@ resources:
   - configmap.yaml
   - backup-cronjob.yaml
   - networkpolicy.yaml
+  - ingress.yaml
