@@ -151,9 +151,10 @@ async function startQueueConsumer(mqCfg: import('@communication/MessageQueue').M
         }
 
         const targetType = msg.target?.type;
-        const agent = targetType ? agentMap.get(targetType) : undefined;
+        const agentKey = normalizeTargetType(targetType || '');
+        const agent = agentKey ? agentMap.get(agentKey) : undefined;
         if (!agent) {
-          console.warn(`[consumer] No agent for target ${targetType}, sending to DLQ`);
+          console.warn(`[consumer] No agent for target ${targetType} (normalized: ${agentKey}), sending to DLQ`);
           await client.lPush(dlqKey, JSON.stringify({
             error: 'no-agent', original: msg,
           }));
@@ -176,6 +177,24 @@ async function startQueueConsumer(mqCfg: import('@communication/MessageQueue').M
       await client.quit();
     }
   };
+}
+
+function normalizeTargetType(input: string): string | '' {
+  if (!input) return '';
+  const key = input.toLowerCase().replace(/[^a-z0-9]/g, '');
+  switch (key) {
+    case 'testwriter':
+    case 'testwriteragent':
+      return 'TestWriter';
+    case 'testexecutor':
+    case 'testexecutoragent':
+      return 'TestExecutor';
+    case 'locatorsynthesis':
+    case 'locatorsynthesisagent':
+      return 'LocatorSynthesis';
+    default:
+      return input; // fallback to provided key
+  }
 }
 
 // Run main only when executed directly

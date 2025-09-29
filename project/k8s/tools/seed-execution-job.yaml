@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-test-execution
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: poster
+          image: curlimages/curl:8.10.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -lc
+            - >-
+              curl -sS -X POST -H 'Content-Type: application/json'
+              --data '{"testCaseId":"T-1","environment":"staging","browser":"chromium","device":"desktop"}'
+              http://stg-matf-service:3000/api/v1/tests/executions && echo "\nSeeded"
+      terminationGracePeriodSeconds: 10
+  backoffLimit: 0

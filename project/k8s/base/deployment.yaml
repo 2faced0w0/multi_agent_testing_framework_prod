@@ -98,6 +98,11 @@ spec:
       initContainers:
         - name: init-data-subdirs
           image: busybox:1.36
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 2000
+            allowPrivilegeEscalation: false
           command: ["sh","-c","mkdir -p /app/data/generated_tests /app/data/test_execution_reports"]
           volumeMounts:
             - name: data
@@ -137,50 +142,3 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: matf-role
-
----
-# Optional: HorizontalPodAutoscaler (requires metrics-server)
-# apiVersion: autoscaling/v2
-# kind: HorizontalPodAutoscaler
-# metadata:
-#   name: multi-agent-testing-framework-hpa
-# spec:
-#   scaleTargetRef:
-#     apiVersion: apps/v1
-#     kind: Deployment
-#     name: multi-agent-testing-framework
-#   minReplicas: 1
-#   maxReplicas: 5
-#   metrics:
-#     - type: Resource
-#       resource:
-#         name: cpu
-#         target:
-#           type: Utilization
-#           averageUtilization: 70
-
----
-# Optional: Ingress (adjust className/hosts/TLS)
-# apiVersion: networking.k8s.io/v1
-# kind: Ingress
-# metadata:
-#   name: matf-ingress
-#   annotations:
-#     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
-# spec:
-#   ingressClassName: nginx
-#   tls:
-#     - hosts:
-#         - your-domain.example.com
-#       secretName: matf-tls
-#   rules:
-#     - host: your-domain.example.com
-#       http:
-#         paths:
-#           - path: /
-#             pathType: Prefix
-#             backend:
-#               service:
-#                 name: matf-service
-#                 port:
-#                   number: 3000

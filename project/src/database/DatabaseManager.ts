@@ -58,6 +58,24 @@ export class DatabaseManager {
       created_at TEXT,
       created_by TEXT
     );`);
+    // Ensure test_executions exists early so read endpoints don't fail before first insert
+    await this.db.exec(`CREATE TABLE IF NOT EXISTS test_executions (
+      id TEXT PRIMARY KEY,
+      testCaseId TEXT,
+      executionId TEXT,
+      environment TEXT,
+      browser TEXT,
+      device TEXT,
+      status TEXT,
+      startTime TEXT,
+      result TEXT,
+      artifacts TEXT,
+      logs TEXT,
+      metrics TEXT,
+      attemptNumber INTEGER,
+      maxAttempts INTEGER,
+      executedBy TEXT
+    );`);
   }
 
   async healthCheck(): Promise<boolean> {

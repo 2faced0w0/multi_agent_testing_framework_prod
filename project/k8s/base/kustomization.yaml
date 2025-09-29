@@ -8,7 +8,3 @@ resources:
   - configmap.yaml
   - backup-cronjob.yaml
   - networkpolicy.yaml
-images:
-  - name: ghcr.io/2faced0w0/multi_agent_testing_framework_prod
-    newName: ghcr.io/2faced0w0/multi_agent_testing_framework_prod
-    newTag: latest
