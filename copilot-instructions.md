@@ -27,7 +27,7 @@ Outcomes:
 
 - `project/src` — TypeScript source
   - `api` — Express server, routes (`/api/v1/system`, `/api/v1/tests/executions`, `/metrics`)
-  - `agents` — Base agent and concrete agents (to be expanded): RepoWatcher/Webhook, TestWriter, Locator Synthesis, TestExecutor, ReportGenerator, Optimizer, ContextManager, Logger
+  - `agents` — Base agent and concrete agents (to be expanded): RepoWatcher/Webhook, TestWriter, Locator Synthesis, TestExecutor, ReportGenerator, TestOptimizer, ContextManager, Logger
   - `communication` — Redis-backed MQ/EventBus/SharedMemory
   - `database` — SQLite database manager and repositories
   - `monitoring` — In-app Prometheus metrics registry

@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matf-agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: matf-agents
+  template:
+    metadata:
+      labels:
+        app: matf-agents
+    spec:
+      serviceAccountName: matf-sa
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agents
+          image: ghcr.io/2faced0w0/multi_agent_testing_framework_prod:latest
+          imagePullPolicy: IfNotPresent
+          command: ["node", "-r", "module-alias/register", "dist/agents/bootstrap.js"]
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: matf-secrets
+                  key: redisPassword
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: matf-secrets
+                  key: jwtSecret
+            - name: MISTRAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: matf-secrets
+                  key: mistralApiKey
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: matf-secrets
+                  key: githubWebhookSecret
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: matf-config
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: logs
+              mountPath: /app/logs
+            - name: data
+              mountPath: /app/generated_tests
+              subPath: generated_tests
+            - name: data
+              mountPath: /app/test_execution_reports
+              subPath: test_execution_reports
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: matf-data
+        - name: logs
+          emptyDir: {}
