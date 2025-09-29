@@ -23,6 +23,16 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: project
@@ -36,6 +46,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run tests
+        env:
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          REDIS_DB: 0
+          NODE_ENV: test
         run: npm test --silent
 
   build-and-push:
