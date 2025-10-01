@@ -63,7 +63,7 @@ export class TestWriterAgent extends BaseAgent {
     const content = this.renderBasicPlaywrightTest(title);
 
     // Ensure target directory exists
-    const outDir = path.resolve(process.cwd(), 'project', 'generated_tests');
+  const outDir = path.resolve(process.cwd(), 'generated_tests');
     await fs.mkdir(outDir, { recursive: true });
     const filename = `${id}.spec.ts`;
     const filePath = path.join(outDir, filename);
@@ -98,6 +98,20 @@ export class TestWriterAgent extends BaseAgent {
 
     // Metrics
     try { metrics.inc('tests_generated_total'); } catch {}
+
+    // Automatically trigger execution
+    try {
+      await this.sendMessage({
+        target: { type: 'TestExecutor' },
+        messageType: 'EXECUTION_REQUEST',
+        payload: {
+          // For CLI mode, executor runs all tests under testsDir; grep optional.
+          // We pass minimal payload for broad compatibility.
+        }
+      });
+    } catch (err) {
+      this.log('warn', 'Failed to enqueue execution request', { error: (err as Error)?.message });
+    }
   }
 
   private renderBasicPlaywrightTest(title: string): string {

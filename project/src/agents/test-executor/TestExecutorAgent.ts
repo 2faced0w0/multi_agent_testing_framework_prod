@@ -77,10 +77,12 @@ export class TestExecutorAgent extends BaseAgent {
       } catch {}
     }
 
-    const projectRoot = process.cwd();
-    const reportRoot = path.resolve(projectRoot, 'project', this.teConfig.execution.reportDir);
-    await fs.mkdir(reportRoot, { recursive: true });
-    const reportPath = path.join(reportRoot, `${execId}.html`);
+  const projectRoot = process.cwd();
+  const reportRoot = path.resolve(projectRoot, this.teConfig.execution.reportDir);
+  await fs.mkdir(reportRoot, { recursive: true });
+  // In Playwright mode, HTML reporter creates a folder; we'll place each execution under its own folder
+  const reportFolder = path.join(reportRoot, execId);
+  const singleHtmlPath = path.join(reportRoot, `${execId}.html`); // used for simulate mode only
 
     let status: 'passed' | 'failed' | 'skipped' = 'passed';
     let summary = '';
@@ -94,21 +96,27 @@ export class TestExecutorAgent extends BaseAgent {
     } else if (this.teConfig.execution.mode === 'simulate') {
       // Write a trivial HTML report quickly
       const html = `<!doctype html><html><head><meta charset=\"utf-8\"><title>Execution ${execId}</title></head><body><h1>Simulated Report</h1><p>Started: ${startedAt.toISOString()}</p><p>Status: passed</p></body></html>`;
-      await fs.writeFile(reportPath, html, 'utf8');
+  await fs.writeFile(singleHtmlPath, html, 'utf8');
       summary = 'Simulated execution: 1 test, 1 passed';
     } else {
       // Playwright CLI mode
-      const testsDir = path.resolve(projectRoot, 'project', this.teConfig.execution.testsDir);
+  const testsDir = path.resolve(projectRoot, this.teConfig.execution.testsDir);
       const grep = payload.grep || '';
       const timeoutMs = this.teConfig.execution.timeoutMs;
-      const args = ['playwright', 'test', testsDir, '--reporter=html', `--reporter-html-output=${reportPath}`];
+      const args = ['playwright', 'test', testsDir, '--reporter=html'];
       if (grep) args.push(`--grep=${grep}`);
 
       await new Promise<void>((resolve, reject) => {
         const child = spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', args, {
           cwd: projectRoot,
           stdio: 'inherit',
-          env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: '0', E2E_BASE_URL: process.env.E2E_BASE_URL || 'https://example.org' }
+          env: {
+            ...process.env,
+            PLAYWRIGHT_BROWSERS_PATH: '0',
+            // Direct Playwright HTML reporter to write into a per-execution folder
+            PLAYWRIGHT_HTML_REPORT: reportFolder,
+            E2E_BASE_URL: process.env.E2E_BASE_URL || 'https://example.org'
+          }
         });
         const to = setTimeout(() => {
           child.kill('SIGKILL');
@@ -144,6 +152,9 @@ export class TestExecutorAgent extends BaseAgent {
       });
     }
 
+    // Determine final report path (for UI static serving)
+    const finalReportPath = this.teConfig.execution.mode === 'simulate' ? singleHtmlPath : path.join(reportFolder, 'index.html');
+
     // Persist execution report row (best-effort)
     try {
       await this.database.initialize();
@@ -151,7 +162,7 @@ export class TestExecutorAgent extends BaseAgent {
       await repo.create({
         id: execId,
         execution_id: execId,
-        report_path: path.relative(path.resolve(projectRoot, 'project'), reportPath).replace(/\\/g, '/'),
+  report_path: path.relative(projectRoot, finalReportPath).replace(/\\/g, '/'),
         summary,
         status,
         created_at: new Date().toISOString(),
@@ -161,27 +172,29 @@ export class TestExecutorAgent extends BaseAgent {
       this.log('warn', 'Failed to persist execution report', { error: (err as Error)?.message });
     }
 
-    // Publish event
-    await this.publishEvent('execution.completed', { id: execId, status, reportPath, summary });
-    // Notify optimizer via MQ for further analysis
-    try {
-      await this.sendMessage({
-        target: { type: 'TestOptimizer' },
-        messageType: 'EXECUTION_RESULT',
-        payload: { executionId: execId, status, summary }
-      });
-    } catch (e) {
-      this.log('warn', 'Failed to notify optimizer', { error: (e as Error)?.message });
-    }
-    // Trigger report generation
-    try {
-      await this.sendMessage({
-        target: { type: 'ReportGenerator' },
-        messageType: 'GENERATE_REPORT',
-        payload: { executionId: execId }
-      });
-    } catch (e) {
-      this.log('warn', 'Failed to request report generation', { error: (e as Error)?.message });
+    // Publish event and follow-ups only if not shutting down
+    if (!this.isStopping) {
+      await this.publishEvent('execution.completed', { id: execId, status, reportPath: finalReportPath, summary });
+      // Notify optimizer via MQ for further analysis
+      try {
+        await this.sendMessage({
+          target: { type: 'TestOptimizer' },
+          messageType: 'EXECUTION_RESULT',
+          payload: { executionId: execId, status, summary }
+        });
+      } catch (e) {
+        this.log('warn', 'Failed to notify optimizer', { error: (e as Error)?.message });
+      }
+      // Trigger report generation
+      try {
+        await this.sendMessage({
+          target: { type: 'ReportGenerator' },
+          messageType: 'GENERATE_REPORT',
+          payload: { executionId: execId }
+        });
+      } catch (e) {
+        this.log('warn', 'Failed to request report generation', { error: (e as Error)?.message });
+      }
     }
 
     // Metrics

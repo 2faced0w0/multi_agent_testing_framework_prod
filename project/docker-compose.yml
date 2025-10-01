@@ -4,6 +4,8 @@ services:
     build: .
     image: multi-agent-testing-framework:latest
     restart: unless-stopped
+    # Run as root in local Windows dev to avoid bind-mount perms issues with SQLite
+    user: "0"
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -21,6 +23,54 @@ services:
     ports:
       - "3005:3000" # avoid host port 3000 conflict
       - "3001:3001"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./generated_tests:/app/generated_tests
+      - ./test_execution_reports:/app/test_execution_reports
+  agents:
+    image: multi-agent-testing-framework:latest
+    restart: unless-stopped
+    user: "0"
+    depends_on:
+      - redis
+    shm_size: '1gb'
+    environment:
+      NODE_ENV: production
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      DATABASE_URL: "sqlite:///app/data/framework.db"
+      JWT_SECRET: "${JWT_SECRET}"
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY}"
+      TE_MODE: playwright
+    command: ["node", "-r", "module-alias/register", "dist/agents/bootstrap.js"]
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./generated_tests:/app/generated_tests
+      - ./test_execution_reports:/app/test_execution_reports
+
+  agents-playwright:
+    image: multi-agent-testing-framework:latest
+    profiles: ["playwright"]
+    restart: unless-stopped
+    user: "0"
+    depends_on:
+      - redis
+    shm_size: '2gb'
+    environment:
+      NODE_ENV: production
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      DATABASE_URL: "sqlite:///app/data/framework.db"
+      JWT_SECRET: "${JWT_SECRET}"
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY}"
+      TE_MODE: playwright
+    command: ["node", "-r", "module-alias/register", "dist/agents/bootstrap.js"]
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

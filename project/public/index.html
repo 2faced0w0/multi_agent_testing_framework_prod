@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MATF Dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Multi‑Agent Testing Framework</h1>
+      <span class="badge">Dark · Minimal</span>
+    </header>
+
+    <section class="card">
+      <h2>Watch a GitHub Repository</h2>
+      <form id="watch-form">
+        <input id="repoUrl" type="url" placeholder="https://github.com/owner/repo" required />
+        <input id="branch" type="text" placeholder="branch (default: main)" />
+        <button type="submit">Add & Queue Analysis</button>
+      </form>
+      <p class="hint">We only accept public GitHub URLs. Set ALLOWED_REPOS for stricter control.</p>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h3>Totals</h3>
+        <ul id="totals"></ul>
+      </div>
+      <div class="card">
+        <h3>Watchers</h3>
+        <form id="watchers-filter" style="margin-bottom:8px; display:flex; gap:8px; align-items:center;">
+          <input id="q" type="text" placeholder="search repo (q)" style="flex:1" />
+          <select id="status">
+            <option value="">status: all</option>
+            <option value="active">active</option>
+            <option value="pending">pending</option>
+            <option value="error">error</option>
+          </select>
+          <button type="submit">Apply</button>
+          <button type="button" id="reset">Reset</button>
+        </form>
+        <ul id="watchers"></ul>
+      </div>
+      <div class="card">
+        <h3>Recent Executions</h3>
+        <ul id="executions"></ul>
+      </div>
+      <div class="card">
+        <h3>Recent Reports</h3>
+        <ul id="reports"></ul>
+      </div>
+      <div class="card">
+        <h3>Recent Test Cases</h3>
+        <ul id="tests"></ul>
+      </div>
+    </section>
+
+    <footer>
+      <span class="chip ok">ok</span>
+      <span class="chip warn">warn</span>
+      <span class="chip err">err</span>
+      <a href="/metrics" target="_blank">Prometheus metrics</a>
+      <a href="/api/v1/system/health" target="_blank">API health</a>
+    </footer>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

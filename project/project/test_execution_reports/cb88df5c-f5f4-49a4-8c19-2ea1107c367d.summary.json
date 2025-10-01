@@ -1,0 +1,12 @@
+{
+  "executionId": "cb88df5c-f5f4-49a4-8c19-2ea1107c367d",
+  "reports": [
+    {
+      "id": "cb88df5c-f5f4-49a4-8c19-2ea1107c367d",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/cb88df5c-f5f4-49a4-8c19-2ea1107c367d.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T08:02:30.373Z"
+}

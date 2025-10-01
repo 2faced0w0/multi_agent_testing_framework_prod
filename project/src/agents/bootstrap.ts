@@ -16,6 +16,12 @@ type ShutdownHandler = () => Promise<void> | void;
 
 async function main(): Promise<void> {
   const appCfg = loadConfig();
+  // In test mode, set up a global shutdown promise so tests can await full teardown
+  let shutdownDoneResolve: (() => void) | null = null;
+  if (process.env.TEST_MODE === 'true') {
+    const p = new Promise<void>((resolve) => { shutdownDoneResolve = resolve; });
+    (global as any).__MATF_SHUTDOWN__ = { promise: p };
+  }
 
   // Build a BaseAgent configuration shared by all agents
   const baseAgentCfg = {
@@ -154,7 +160,14 @@ async function main(): Promise<void> {
     for (const s of shutdowns) {
       try { await s(); } catch (e) { console.error('[bootstrap] Shutdown step failed', e); }
     }
-    process.exit(0);
+    // Resolve test shutdown promise if present
+    if (process.env.TEST_MODE === 'true' && shutdownDoneResolve) {
+      try { shutdownDoneResolve(); } catch { /* noop */ }
+    }
+    // In test environments, avoid forcing process.exit to prevent Jest errors
+    if (!process.env.JEST_WORKER_ID && process.env.TEST_MODE !== 'true') {
+      process.exit(0);
+    }
   };
 
   process.on('SIGINT', () => onSignal('SIGINT'));

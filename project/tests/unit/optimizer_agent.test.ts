@@ -2,6 +2,7 @@ import { TestOptimizerAgent } from '../../src/agents/test-optimizer/TestOptimize
 import { DatabaseManager } from '../../src/database/DatabaseManager';
 import { acquireGlobalDatabase } from '../../src/database/GlobalDatabase';
 import type { AgentMessage } from '../../src/types/communication';
+import { RecommendationsRepository } from '../../src/database/repositories/RecommendationsRepository';
 
 function baseCfg() {
   return {
@@ -24,8 +25,25 @@ describe('TestOptimizerAgent', () => {
   });
 
   test('creates recommendation on failed execution', async () => {
-    const agent = new TestOptimizerAgent(baseCfg());
-    await agent.initialize();
+    // Disable retries/backoff and stub networked dependencies to keep test fast and isolated
+    const cfg = baseCfg();
+    (cfg as any).retryPolicy = { maxAttempts: 0, backoffMs: 0 };
+    const agent = new TestOptimizerAgent(cfg as any);
+
+    // Stub sharedMemory to avoid Redis connections
+    (agent as any)['sharedMemory'] = {
+      get: async (_key: string) => ({ attempts: 0 }),
+      set: async (_key: string, _val: any, _ttl?: number) => { /* no-op */ },
+      getConnectionStats: async () => ({})
+    };
+
+    // Provide a real repo on the in-memory DB without full initialize()
+    const db = acquireGlobalDatabase({ path: ':memory:', timeout: 1000, verbose: false, memory: true } as any).getDatabase();
+    (agent as any)['repo'] = new RecommendationsRepository(db);
+  // Stub networked interactions to keep the test self-contained
+  (agent as any)['sendMessage'] = async () => { /* no-op */ };
+  (agent as any)['publishEvent'] = async () => { /* no-op */ };
+
     const msg: AgentMessage = {
       id: 'm1',
       messageType: 'EXECUTION_RESULT',
@@ -34,7 +52,7 @@ describe('TestOptimizerAgent', () => {
       timestamp: new Date(),
       payload: { executionId: 'e1', status: 'failed', summary: 'oops' }
     };
-    await agent['processMessage'](msg);
-    await agent.shutdown();
+    await (agent as any)['processMessage'](msg);
+    // No shutdown needed since we didn't initialize external clients
   });
 });

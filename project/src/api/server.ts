@@ -9,6 +9,7 @@ import reportsRoutes from './routes/reports';
 import logsRoutes from './routes/logs';
 import testExecutionsRoutes from './routes/test-executions';
 import webhookRoutes, { rawBodySaver } from './routes/webhooks';
+import guiRoutes from './routes/gui';
 import { metrics } from '@monitoring/Metrics';
 
 const app = express();
@@ -61,6 +62,7 @@ app.use('/api/v1/reports', reportsRoutes);
 app.use('/api/v1/tests/cases', testCasesRoutes);
 app.use('/api/v1/tests/executions', testExecutionsRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
+app.use('/api/v1/gui', guiRoutes);
 
 // Prometheus metrics exposition
 app.get('/metrics', (_req, res) => {
@@ -68,8 +70,27 @@ app.get('/metrics', (_req, res) => {
   res.send(metrics.toText());
 });
 
-// Root
-app.get('/', (_req, res) => res.send('Multi-Agent Testing Framework API'));
+// Static dashboard (served from public/)
+app.use(express.static('public', { index: ['index.html'] }));
+// Read-only static access to generated reports (for HTML viewing)
+// Relax CSP only for this route to allow Playwright report's inline scripts/styles
+app.use('/reports-static', (_req, res, next) => {
+  // Allow inline scripts/styles and data: URIs specifically for reports
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "frame-ancestors 'self'",
+    ].join('; ')
+  );
+  next();
+});
+app.use('/reports-static', express.static('test_execution_reports'));
 
 // Only start server if executed directly (not during tests importing app)
 if (require.main === module) {

@@ -3,6 +3,7 @@ kind: Kustomization
 namePrefix: prod-
 namespace: matf-production
 resources:
+  - ./namespace.yaml
   - ../../base
 images:
   - name: ghcr.io/2faced0w0/multi_agent_testing_framework_prod

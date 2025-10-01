@@ -5,6 +5,8 @@ import { loadConfig } from '@api/config';
 import { MessageQueue } from '@communication/MessageQueue';
 import type { AgentMessage } from '@app-types/communication';
 import { extractChangedFiles, hasUIChanges } from '@api/routes/webhooks_utils';
+import { ensureDatabaseInitialized, getDatabaseManager } from '@api/context';
+import { WatchedRepoRepository } from '@database/repositories/WatchedRepoRepository';
 import { metrics } from '@monitoring/Metrics';
 
 const router = Router();
@@ -77,6 +79,34 @@ router.post('/github', async (req: Request, res: Response) => {
   if (!uiChanged) {
     return res.status(202).json({ status: 'no-ui-change', delivery, filesConsidered: changedFiles.length });
   }
+
+  const requireWatched = process.env.WEBHOOK_REQUIRE_WATCHED === 'true';
+  await ensureDatabaseInitialized();
+  const db = getDatabaseManager().getDatabase();
+  const watcherRepo = new WatchedRepoRepository(db);
+  const fullName = payload?.repository?.full_name || '';
+  const watch = await watcherRepo.findByFullName(fullName);
+  if (requireWatched && !watch) {
+    metrics.inc('webhook_repo_not_watched_total');
+    return res.status(202).json({ status: 'ignored-not-watched', delivery, filesConsidered: changedFiles.length });
+  }
+
+  // Record last event metadata
+  try {
+    const meta = {
+      delivery,
+      event,
+      ref: payload?.ref,
+      head: payload?.head_commit?.id,
+      compare: payload?.compare,
+      changedFiles,
+      uiChanged,
+      receivedAt: new Date().toISOString(),
+    };
+    if (watch) {
+      await db.run(`UPDATE watched_repos SET last_event = ?, updated_at = ? WHERE id = ?`, JSON.stringify(meta), new Date().toISOString(), watch.id);
+    }
+  } catch {}
 
   const cfg = loadConfig();
   const mq = new MessageQueue(cfg.messageQueue);

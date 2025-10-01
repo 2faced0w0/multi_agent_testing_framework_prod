@@ -1,0 +1,12 @@
+{
+  "executionId": "24592fac-393e-471d-9623-9009011ae752",
+  "reports": [
+    {
+      "id": "24592fac-393e-471d-9623-9009011ae752",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/24592fac-393e-471d-9623-9009011ae752.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T09:00:32.951Z"
+}

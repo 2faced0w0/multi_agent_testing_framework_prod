@@ -1,0 +1,12 @@
+{
+  "executionId": "7eecfd11-1081-4647-a9e0-031dbaf24a31",
+  "reports": [
+    {
+      "id": "7eecfd11-1081-4647-a9e0-031dbaf24a31",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/7eecfd11-1081-4647-a9e0-031dbaf24a31.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T08:20:00.203Z"
+}

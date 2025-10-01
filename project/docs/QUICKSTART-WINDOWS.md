@@ -5,8 +5,6 @@ This guide helps you run the Multi-Agent Testing Framework on Windows using eith
 ## Option A: Run with Docker Compose (recommended)
 
 Requirements:
-- Docker Desktop for Windows
-- Git
 
 Steps:
 1. Open PowerShell or Command Prompt.
@@ -17,16 +15,13 @@ Steps:
 
 Commands:
 
-- Clone and setup env
   git clone <your-repo-url>
   cd multi_agent_testing_framework_prod\project
   copy .env.example .env
   rem Edit .env and set at least GRAFANA_ADMIN_PASSWORD and JWT_SECRET
 
-- Start containers (Docker Desktop must be running)
-  docker compose up -d
+docker compose up -d
 
-- Verify services
   curl http://localhost:3005/ # API welcome
   curl http://localhost:3005/api/v1/system/health
   curl http://localhost:9090/  # Prometheus
@@ -34,10 +29,22 @@ Commands:
 
 Notes:
 - API is exposed on http://localhost:3005 (internal 3000 remapped to avoid conflicts)
-- Redis is started for you with a password from .env (REDIS_PASSWORD)
-- Data, logs, generated tests, and reports are mounted from the host into the container
+- Agents now run as a separate service (`agents`) automatically
+- Default agent `TE_MODE` is `simulate` in Compose. For real browser runs, use the Playwright profile which uses a browser-enabled image:
 
-## Option B: Run locally (Node + Redis)
+Run Playwright agents (Docker Compose profile):
+
+  rem Start API, infra, and Playwright agents
+  cd project
+  docker compose --profile playwright up -d
+
+  rem Stop the Playwright agents later
+  docker compose --profile playwright stop agents-playwright
+
+If you want only Playwright agents and not the default `agents` service, either stop `agents` after `up`, or start services explicitly:
+
+  docker compose up -d framework redis prometheus grafana
+  docker compose --profile playwright up -d agents-playwright
 
 Requirements:
 - Node.js 18+
@@ -75,16 +82,16 @@ Commands (cmd.exe):
   curl http://localhost:3000/api/v1/system/health
   curl http://localhost:3000/metrics
 
-### Playwright browsers (only needed if TE_MODE=playwright)
-By default `TE_MODE=simulate` so no browsers are required. If you want to execute real browser tests:
+### Playwright browsers (native, non-Docker)
+By default `TE_MODE=simulate` so no browsers are required. If you want to execute real browser tests natively on Windows:
 
 - Install Playwright browsers
-  npx playwright install --with-deps
+  npx playwright install
 
 - Switch mode
   set TE_MODE=playwright
 
-If using Docker Compose, the container can be extended to include browsers; otherwise install them on the host.
+When using Docker Compose with the Playwright profile, you do not need to install browsers on the host.
 
 ## Common issues
 - Port 3000 already in use: Adjust `PORT` in `.env`, or use Docker Compose which maps API to port 3005.

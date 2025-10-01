@@ -28,8 +28,9 @@ router.get('/:id/download', maybeAuth, maybeRequireRole(['admin', 'ops', 'viewer
     const db = dbm.getDatabase();
     const row = await db.get(`SELECT * FROM test_reports WHERE id = ?`, req.params.id);
     if (!row) return res.status(404).json({ error: 'Not found' });
-    const projectRoot = process.cwd();
-    const fullPath = path.resolve(projectRoot, 'project', row.path);
+  const projectRoot = process.cwd();
+  // Stored report paths are relative to project root; don't prepend extra segments
+  const fullPath = path.resolve(projectRoot, row.path);
     const data = await fs.readFile(fullPath);
     res.setHeader('Content-Type', row.type === 'json' ? 'application/json' : 'text/html');
     res.setHeader('Content-Disposition', `attachment; filename="${path.basename(fullPath)}"`);

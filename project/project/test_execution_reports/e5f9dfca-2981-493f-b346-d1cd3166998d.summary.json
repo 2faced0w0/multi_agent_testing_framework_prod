@@ -1,0 +1,12 @@
+{
+  "executionId": "e5f9dfca-2981-493f-b346-d1cd3166998d",
+  "reports": [
+    {
+      "id": "e5f9dfca-2981-493f-b346-d1cd3166998d",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/e5f9dfca-2981-493f-b346-d1cd3166998d.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T08:25:37.295Z"
+}

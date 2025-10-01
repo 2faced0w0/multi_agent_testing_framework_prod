@@ -1,0 +1,12 @@
+{
+  "executionId": "a694c8cf-2546-43f0-ad32-145f1b6e7135",
+  "reports": [
+    {
+      "id": "a694c8cf-2546-43f0-ad32-145f1b6e7135",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/a694c8cf-2546-43f0-ad32-145f1b6e7135.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T08:02:24.336Z"
+}

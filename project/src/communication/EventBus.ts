@@ -18,8 +18,12 @@ export class EventBus {
     await Promise.all([this.pub.connect(), this.sub.connect()]);
   }
 
+  isConnected(): boolean {
+    return !!this.pub?.isOpen && !!this.sub?.isOpen;
+  }
+
   async publishEvent(e: SystemEvent): Promise<void> {
-    if (!this.pub) throw new Error('EventBus not initialized');
+    if (!this.pub || !this.pub.isOpen) throw new Error('EventBus not initialized');
     await this.pub.publish(this.cfg.channels.system, JSON.stringify(e));
   }
 

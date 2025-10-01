@@ -1,4 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs/promises';
+import path from 'path';
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 import { acquireGlobalDatabase } from '@database/GlobalDatabase';
@@ -6,11 +8,13 @@ import { LogsRepository, type LogRow } from '@database/repositories/LogsReposito
 
 export interface LoggerAgentConfig extends BaseAgentConfig {
   retentionDays?: number;
+  syslogPath?: string; // relative to project root or absolute
 }
 
 export class LoggerAgent extends BaseAgent {
   private logsRepo!: LogsRepository;
   private retentionDays: number;
+  private syslogFullPath: string = '';
 
   constructor(cfg: LoggerAgentConfig) {
     super({ ...cfg, agentType: 'Logger' });
@@ -20,6 +24,12 @@ export class LoggerAgent extends BaseAgent {
   protected async onInitialize(): Promise<void> {
     const db = acquireGlobalDatabase(this['config'].database).getDatabase();
     this.logsRepo = new LogsRepository(db);
+    // Prepare syslog file path
+    const projectRoot = process.cwd();
+    const rel = this['config'].logging && (this as any).config.syslogPath ? (this as any).config.syslogPath : 'logs/syslog.log';
+    this.syslogFullPath = path.isAbsolute(rel) ? rel : path.resolve(projectRoot, rel);
+    const dir = path.dirname(this.syslogFullPath);
+    await fs.mkdir(dir, { recursive: true });
   }
 
   protected async onShutdown(): Promise<void> {
@@ -57,6 +67,21 @@ export class LoggerAgent extends BaseAgent {
     } as any;
     await this.logsRepo.create(row);
     await this['publishEvent']('agent.log.received', { id: row.id, level: row.level });
+    // Append to syslog file (best-effort)
+    try {
+      const line = JSON.stringify({
+        ts: row.timestamp,
+        level: row.level,
+        msg: row.message,
+        src: { service: row.source_service, comp: row.source_component, inst: row.source_instance },
+        ctx: row.context,
+        tags: row.tags,
+        cid: row.correlation_id
+      }) + '\n';
+      await fs.appendFile(this.syslogFullPath, line, 'utf8');
+    } catch (e) {
+      this['log']('debug', 'Failed to write to syslog file', { error: (e as Error)?.message });
+    }
   }
 
   private async handleQueryLogs(message: AgentMessage) {

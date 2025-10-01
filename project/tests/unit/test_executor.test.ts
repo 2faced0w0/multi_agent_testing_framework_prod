@@ -32,8 +32,8 @@ describe('TestExecutorAgent (simulate)', () => {
       messageType: 'EXECUTION_REQUEST',
       payload: {},
     } as any);
-    // look for a report created after the message
-    const reportDir = path.resolve(process.cwd(), 'project', 'test_execution_reports');
+  // look for a report created after the message (agent writes under cwd/test_execution_reports)
+  const reportDir = path.resolve(process.cwd(), 'test_execution_reports');
     const files = await fs.readdir(reportDir);
     const statMatches: string[] = [];
     for (const f of files) {

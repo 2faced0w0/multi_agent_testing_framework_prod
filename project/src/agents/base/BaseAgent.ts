@@ -401,6 +401,14 @@ export abstract class BaseAgent extends EventEmitter {
    */
   protected async sendMessage(message: Omit<AgentMessage, 'id' | 'source' | 'timestamp'>): Promise<string> {
     try {
+      // If shutting down or MQ not connected, fail fast to avoid throwing deep Redis errors
+      if (this.isShuttingDown) {
+        throw new Error('Agent is shutting down');
+      }
+      const mqAny: any = this.messageQueue as any;
+      if (typeof mqAny.isConnected === 'function' && !mqAny.isConnected()) {
+        throw new Error('MQ not initialized');
+      }
       const fullMessage: AgentMessage = {
         id: uuidv4(),
         source: this.agentId,
@@ -414,8 +422,15 @@ export abstract class BaseAgent extends EventEmitter {
       return fullMessage.id;
       
     } catch (error) {
-      this.handleError('Failed to send message', error as Error);
-      throw error;
+      // Avoid recursive logging during log forwarding or shutdown
+      const err = error as Error;
+      if (!this.isShuttingDown) {
+        try {
+          // Only log minimal error to console to prevent re-entry to sendMessage
+          console.error(JSON.stringify({ timestamp: new Date().toISOString(), level: 'ERROR', agent: this.agentId, message: 'Failed to send message', error: err.message }));
+        } catch { /* noop */ }
+      }
+      throw err;
     }
   }
 
@@ -424,6 +439,14 @@ export abstract class BaseAgent extends EventEmitter {
    */
   protected async publishEvent(eventType: string, data: any, category: 'system' | 'business' | 'security' | 'performance' = 'system'): Promise<void> {
     try {
+      // During shutdown, do not publish events to avoid throwing from disconnected clients
+      if (this.isShuttingDown) {
+        return; // no-op during teardown
+      }
+      const ebAny: any = this.eventBus as any;
+      if (typeof ebAny.isConnected === 'function' && !ebAny.isConnected()) {
+        return; // quietly skip when EventBus is not connected yet
+      }
       const event: SystemEvent = {
         eventId: uuidv4(),
         eventType,
@@ -445,8 +468,14 @@ export abstract class BaseAgent extends EventEmitter {
       this.log('debug', 'Event published', { eventType, category });
       
     } catch (error) {
-      this.handleError('Failed to publish event', error as Error);
-      throw error;
+      // Avoid recursive emission during teardown
+      const err = error as Error;
+      if (!this.isShuttingDown) {
+        try {
+          console.error(JSON.stringify({ timestamp: new Date().toISOString(), level: 'ERROR', agent: this.agentId, message: 'Failed to publish event', error: err.message }));
+        } catch { /* noop */ }
+      }
+      // Do not rethrow here; swallowing prevents shutdown-time unhandled errors
     }
   }
 
@@ -484,6 +513,11 @@ export abstract class BaseAgent extends EventEmitter {
    * Handle incoming message (called by external message consumer)
    */
   public async handleIncomingMessage(message: AgentMessage): Promise<void> {
+    // If teardown is in progress, drop incoming work to avoid interacting with closed clients
+    if (this.isShuttingDown) {
+      this.log('warn', 'Agent is shutting down; dropping message', { messageId: message.id, messageType: message.messageType });
+      return;
+    }
     if (this.circuitBreakerOpen) {
       this.log('warn', 'Circuit breaker open, rejecting message', { messageId: message.id });
       return;
@@ -497,8 +531,14 @@ export abstract class BaseAgent extends EventEmitter {
       // Process the message
       await this.processMessage(message);
       
-      // Acknowledge successful processing
-      await this.messageQueue.acknowledgeMessage(message.id);
+      // Acknowledge successful processing only if MQ is available and not shutting down
+      const mqAnyAck: any = this.messageQueue as any;
+      const canAck = !this.isShuttingDown && (typeof mqAnyAck.isConnected !== 'function' || mqAnyAck.isConnected());
+      if (canAck) {
+        await this.messageQueue.acknowledgeMessage(message.id);
+      } else {
+        this.log('debug', 'Skipping ack during shutdown or when MQ unavailable', { messageId: message.id });
+      }
       
       // Update metrics
       const processingTime = Date.now() - startTime;
@@ -516,9 +556,15 @@ export abstract class BaseAgent extends EventEmitter {
       // Consider opening circuit breaker if too many failures
       this.evaluateCircuitBreaker();
       
-      // Mark message as failed so MQ can retry or route to DLQ
+      // Mark message as failed so MQ can retry or route to DLQ, if possible
       try {
-        await this.messageQueue.failMessage(message.id, message);
+        const mqAnyFail: any = this.messageQueue as any;
+        const canFail = !this.isShuttingDown && (typeof mqAnyFail.isConnected !== 'function' || mqAnyFail.isConnected());
+        if (canFail) {
+          await this.messageQueue.failMessage(message.id, message);
+        } else {
+          this.log('debug', 'Skipping failMessage during shutdown or when MQ unavailable', { messageId: message.id });
+        }
       } catch (failErr) {
         this.log('error', 'Failed to mark message as failed in MQ', { messageId: message.id, error: (failErr as Error)?.message });
       }
@@ -560,7 +606,15 @@ export abstract class BaseAgent extends EventEmitter {
     this.log('error', context, { error: error.message, stack: error.stack, metadata });
     
     // Emit error event for external handling
-    this.emit('error', { context, error, metadata, agentId: this.agentId });
+    // Avoid Node's default behavior of throwing when 'error' is emitted with no listeners
+    // and avoid emitting errors during shutdown/teardown.
+    try {
+      if (!this.isShuttingDown && this.listenerCount('error') > 0) {
+        this.emit('error', { context, error, metadata, agentId: this.agentId });
+      }
+    } catch {
+      // Swallow any emission-related issues to keep agent stable, especially during teardown
+    }
     
     // Update health status if too many errors
     if (this.metrics.errorsCount > 10) {
@@ -721,6 +775,11 @@ export abstract class BaseAgent extends EventEmitter {
       this.log('info', 'Circuit breaker reset');
     }
   }
+
+  // Allow subclasses to check if shutdown is in progress to skip non-essential work
+  protected get isStopping(): boolean {
+    return this.isShuttingDown;
+  }
   
   private addLifecycleEvent(event: string): void {
     this.metrics.lifecycleEvents.push(`${new Date().toISOString()}: ${event}`);
@@ -750,6 +809,22 @@ export abstract class BaseAgent extends EventEmitter {
       };
       
       console[level === 'debug' ? 'log' : level](JSON.stringify(logEntry));
+      // Also forward to LoggerAgent asynchronously (best-effort)
+      if (this.isInitialized && !this.isShuttingDown) {
+        // Do not rethrow if logger forwarding fails
+        void this.sendMessage({
+          target: { type: 'Logger' },
+          messageType: 'LOG_ENTRY',
+          payload: {
+            level,
+            message,
+            context: metadata,
+            source_service: 'multi-agent-framework',
+            source_component: this.agentId.type,
+            source_instance: this.agentId.instanceId,
+          }
+        }).catch(() => {});
+      }
     }
   }
   

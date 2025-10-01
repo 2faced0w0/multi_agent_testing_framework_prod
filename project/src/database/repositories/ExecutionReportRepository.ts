@@ -34,4 +34,8 @@ export class ExecutionReportRepository {
   async listByExecution(executionId: string) {
     return this.db.all(`SELECT * FROM execution_reports WHERE execution_id = ? ORDER BY datetime(created_at) DESC`, executionId);
   }
+
+  async listRecent(limit: number) {
+    return this.db.all(`SELECT * FROM execution_reports ORDER BY datetime(created_at) DESC LIMIT ?`, limit);
+  }
 }

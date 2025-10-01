@@ -157,6 +157,18 @@ export class DatabaseManager {
       created_at TEXT,
       created_by TEXT
     );`);
+
+    // Watched GitHub repositories for GUI dashboard
+    await this.db.exec(`CREATE TABLE IF NOT EXISTS watched_repos (
+      id TEXT PRIMARY KEY,
+      full_name TEXT UNIQUE,
+      default_branch TEXT,
+      status TEXT,
+      note TEXT,
+      last_event TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );`);
   }
 
   async healthCheck(): Promise<boolean> {

@@ -1,0 +1,12 @@
+{
+  "executionId": "460167d4-6566-4a39-8786-48f961f069d0",
+  "reports": [
+    {
+      "id": "460167d4-6566-4a39-8786-48f961f069d0",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/460167d4-6566-4a39-8786-48f961f069d0.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T08:19:04.533Z"
+}

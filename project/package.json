@@ -7,8 +7,8 @@
     "build": "tsc",
     "start": "node -r module-alias/register dist/api/server.js",
     "dev": "ts-node -r tsconfig-paths/register src/api/server.ts",
-    "demo": "ts-node demo.ts",
-  "watch": "nodemon --exec ts-node src/api/server.ts",
+    "demo": "ts-node scripts/demo-smoke.ts",
+    "watch": "nodemon --exec ts-node src/api/server.ts",
     "test": "jest",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
@@ -22,7 +22,10 @@
     "start:services": "docker-compose up -d redis",
     "start:framework": "npm run build && npm start",
     "start:agents": "node -r module-alias/register dist/agents/bootstrap.js",
-    "dev:agents": "ts-node -r tsconfig-paths/register src/agents/bootstrap.ts"
+    "dev:agents": "ts-node -r tsconfig-paths/register src/agents/bootstrap.ts",
+    "compose:up": "docker compose up -d",
+    "compose:down": "docker compose down",
+    "compose:up:playwright": "docker compose --profile playwright up -d agents-playwright"
   },
   "keywords": [
     "testing",
@@ -40,6 +43,7 @@
     "@mistralai/mistralai": "^0.4.0",
     "@playwright/test": "^1.40.0",
     "ajv": "^8.12.0",
+    "archiver": "^5.3.2",
     "cors": "^2.8.5",
     "date-fns": "^2.30.0",
     "dotenv": "^16.3.1",
@@ -64,6 +68,7 @@
     "@babel/core": "^7.28.4",
     "@babel/preset-env": "^7.28.3",
     "@babel/preset-typescript": "^7.27.1",
+    "@types/archiver": "^6.0.3",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.8",

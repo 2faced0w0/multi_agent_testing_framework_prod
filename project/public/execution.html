@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Execution • MATF</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <a href="/" style="color:var(--accent);text-decoration:none">← Back</a>
+      <h1 style="margin:0">Execution Details</h1>
+    </header>
+    <section class="card">
+      <div id="summary"></div>
+    </section>
+    <section class="card">
+      <h3>Reports</h3>
+      <button id="open-latest">Open latest HTML report</button>
+      <ul id="reports"></ul>
+    </section>
+    <section class="card">
+      <h3>Artifacts</h3>
+      <button id="dl">Download artifacts (.zip)</button>
+      <ul id="arts"></ul>
+    </section>
+  </div>
+  <script>
+    function qs(name){ const u=new URL(location.href); return u.searchParams.get(name); }
+    const id = qs('id');
+    async function load(){
+      const res = await fetch(`/api/v1/gui/executions/${id}`);
+      if(!res.ok){ document.getElementById('summary').textContent = 'Not found'; return; }
+      const data = await res.json();
+      const e = data.execution;
+      document.getElementById('summary').textContent = `${e.id} – ${e.status} – ${e.browser || ''} ${e.device || ''}`;
+      const ulr = document.getElementById('reports');
+      function toStaticUrl(p){
+        const rp = String(p||'').replace(/\\/g,'/');
+        const rel = rp.replace(/^test_execution_reports\//,'');
+        // encode each path segment to preserve slashes
+        const encoded = rel.split('/').map(encodeURIComponent).join('/');
+        return `/reports-static/${encoded}`;
+      }
+      data.reports.forEach(r=>{
+        const a = document.createElement('a'); a.href = `/report.html?id=${encodeURIComponent(r.id)}`; a.textContent = r.id; a.target = '_blank';
+        const li = document.createElement('li');
+        li.append(a);
+        // Add inline HTML link when available
+        if (String(r.report_path||'').toLowerCase().endsWith('.html')){
+          const sep = document.createTextNode(' • ');
+          const inline = document.createElement('a'); inline.href = toStaticUrl(r.report_path); inline.textContent = 'Open HTML'; inline.target = '_blank';
+          li.append(sep, inline);
+        }
+        ulr.append(li);
+      });
+      // Open latest HTML report button
+      document.getElementById('open-latest').onclick = ()=>{
+        const html = data.reports.find((r)=> String(r.report_path||'').toLowerCase().endsWith('.html'));
+        if (!html) { alert('No HTML report found'); return; }
+        const rp = String(html.report_path||'').replace(/\\/g,'/');
+        // Prefer inline static route for HTML viewing
+        if (rp.startsWith('test_execution_reports/')) {
+          window.open(toStaticUrl(rp), '_blank');
+          return;
+        }
+        // Fallback to download endpoint
+        window.open(`/api/v1/reports/${encodeURIComponent(html.id)}/download`, '_blank');
+      };
+      const ula = document.getElementById('arts');
+      data.artifacts.forEach(a=>{
+        const li = document.createElement('li'); li.textContent = `${a.type} – ${a.path}`; ula.append(li);
+      });
+      document.getElementById('dl').onclick = ()=> { location.href = `/api/v1/gui/executions/${id}/artifacts.zip`; };
+    }
+    load();
+  </script>
+</body>
+</html>

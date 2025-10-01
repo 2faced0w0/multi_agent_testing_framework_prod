@@ -55,4 +55,9 @@ export class TestExecutionRepository {
   async updateStatus(id: string, status: string) {
     await this.db.run(`UPDATE test_executions SET status = ? WHERE id = ?`, status, id);
   }
+
+  async countAll(): Promise<number> {
+    const r: any = await this.db.get(`SELECT COUNT(1) as c FROM test_executions`);
+    return r?.c || 0;
+  }
 }

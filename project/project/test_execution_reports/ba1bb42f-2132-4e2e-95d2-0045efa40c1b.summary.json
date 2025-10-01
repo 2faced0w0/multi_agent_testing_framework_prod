@@ -1,0 +1,12 @@
+{
+  "executionId": "ba1bb42f-2132-4e2e-95d2-0045efa40c1b",
+  "reports": [
+    {
+      "id": "ba1bb42f-2132-4e2e-95d2-0045efa40c1b",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/ba1bb42f-2132-4e2e-95d2-0045efa40c1b.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T08:40:05.164Z"
+}

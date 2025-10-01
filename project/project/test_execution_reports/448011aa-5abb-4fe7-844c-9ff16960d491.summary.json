@@ -1,0 +1,12 @@
+{
+  "executionId": "448011aa-5abb-4fe7-844c-9ff16960d491",
+  "reports": [
+    {
+      "id": "448011aa-5abb-4fe7-844c-9ff16960d491",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/448011aa-5abb-4fe7-844c-9ff16960d491.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T08:34:58.864Z"
+}

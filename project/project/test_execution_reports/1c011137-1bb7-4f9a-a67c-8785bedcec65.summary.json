@@ -1,0 +1,12 @@
+{
+  "executionId": "1c011137-1bb7-4f9a-a67c-8785bedcec65",
+  "reports": [
+    {
+      "id": "1c011137-1bb7-4f9a-a67c-8785bedcec65",
+      "status": "passed",
+      "summary": "Simulated execution: 1 test, 1 passed",
+      "report_path": "test_execution_reports/1c011137-1bb7-4f9a-a67c-8785bedcec65.html"
+    }
+  ],
+  "generatedAt": "2025-10-01T08:21:08.197Z"
+}
