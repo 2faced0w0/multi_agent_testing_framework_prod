@@ -101,12 +101,14 @@ jobs:
         working-directory: project/k8s/overlays/staging
         run: |
           kustomize edit set image ${{ env.IMAGE_NAME }}=${{ env.IMAGE_NAME }}:staging
+          kustomize build . > /dev/null
           kubectl apply -k .
       - name: Patch image tag and deploy (production)
         if: ${{ inputs.environment == 'production' }}
         working-directory: project/k8s/overlays/production
         run: |
           kustomize edit set image ${{ env.IMAGE_NAME }}=${{ env.IMAGE_NAME }}:latest
+          kustomize build . > /dev/null
           kubectl apply -k .
 
   deploy-production:
@@ -130,6 +132,7 @@ jobs:
         working-directory: project/k8s/overlays/production
         run: |
           kustomize edit set image ${{ env.IMAGE_NAME }}=${{ env.IMAGE_NAME }}:latest
+          kustomize build . > /dev/null
           kubectl apply -k .
 
   deploy-staging:
@@ -153,4 +156,5 @@ jobs:
         working-directory: project/k8s/overlays/staging
         run: |
           kustomize edit set image ${{ env.IMAGE_NAME }}=${{ env.IMAGE_NAME }}:staging
+          kustomize build . > /dev/null
           kubectl apply -k .

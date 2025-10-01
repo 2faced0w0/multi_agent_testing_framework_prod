@@ -65,15 +65,17 @@ export class TestExecutorAgent extends BaseAgent {
     }
     if (message.messageType !== 'EXECUTION_REQUEST') return;
 
-    const payload: any = message.payload || {};
-    const execId = uuidv4();
-    const startedAt = new Date();
-    const apiExecId = payload?.data?.executionId as string | undefined;
+  const payload: any = message.payload || {};
+  // Internal unique id for this run context (used only when we don't have an API execution id)
+  const internalRunId = uuidv4();
+  const startedAt = new Date();
+  const apiExecId = (payload?.data?.executionId as string | undefined) || (payload?.executionId as string | undefined);
     // Mark running if we have a corresponding API execution row
     if (apiExecId) {
       try {
         const ter = new TestExecutionRepository(this.database.getDatabase());
         await ter.updateStatus(apiExecId, 'running');
+        try { await ter.updateProgress(apiExecId, 0.1); } catch {}
       } catch {}
     }
 
@@ -81,8 +83,10 @@ export class TestExecutorAgent extends BaseAgent {
   const reportRoot = path.resolve(projectRoot, this.teConfig.execution.reportDir);
   await fs.mkdir(reportRoot, { recursive: true });
   // In Playwright mode, HTML reporter creates a folder; we'll place each execution under its own folder
-  const reportFolder = path.join(reportRoot, execId);
-  const singleHtmlPath = path.join(reportRoot, `${execId}.html`); // used for simulate mode only
+  // Prefer linking the folder name to the API execution id when available for consistent UI mapping
+  const folderName = apiExecId || internalRunId;
+  const reportFolder = path.join(reportRoot, folderName);
+  const singleHtmlPath = path.join(reportRoot, `${folderName}.html`); // used for simulate mode only
 
     let status: 'passed' | 'failed' | 'skipped' = 'passed';
     let summary = '';
@@ -95,9 +99,10 @@ export class TestExecutorAgent extends BaseAgent {
       }
     } else if (this.teConfig.execution.mode === 'simulate') {
       // Write a trivial HTML report quickly
-      const html = `<!doctype html><html><head><meta charset=\"utf-8\"><title>Execution ${execId}</title></head><body><h1>Simulated Report</h1><p>Started: ${startedAt.toISOString()}</p><p>Status: passed</p></body></html>`;
+  const html = `<!doctype html><html><head><meta charset=\"utf-8\"><title>Execution ${folderName}</title></head><body><h1>Simulated Report</h1><p>Started: ${startedAt.toISOString()}</p><p>Status: passed</p></body></html>`;
   await fs.writeFile(singleHtmlPath, html, 'utf8');
       summary = 'Simulated execution: 1 test, 1 passed';
+      if (apiExecId) { try { const ter = new TestExecutionRepository(this.database.getDatabase()); await ter.updateProgress(apiExecId, 1.0); } catch {} }
     } else {
       // Playwright CLI mode
   const testsDir = path.resolve(projectRoot, this.teConfig.execution.testsDir);
@@ -112,7 +117,7 @@ export class TestExecutorAgent extends BaseAgent {
           stdio: 'inherit',
           env: {
             ...process.env,
-            PLAYWRIGHT_BROWSERS_PATH: '0',
+            // Do NOT override PLAYWRIGHT_BROWSERS_PATH. The official Playwright image ships browsers under /ms-playwright
             // Direct Playwright HTML reporter to write into a per-execution folder
             PLAYWRIGHT_HTML_REPORT: reportFolder,
             E2E_BASE_URL: process.env.E2E_BASE_URL || 'https://example.org'
@@ -122,6 +127,8 @@ export class TestExecutorAgent extends BaseAgent {
           child.kill('SIGKILL');
           reject(new Error(`Playwright execution timed out after ${timeoutMs}ms`));
         }, timeoutMs);
+  // rough milestone at ~50% when child started
+  if (apiExecId) { try { const ter = new TestExecutionRepository(this.database.getDatabase()); ter.updateProgress(apiExecId, 0.5).catch(()=>{}); } catch {} }
         const checkCancel = setInterval(() => {
           if (this.cancellations.has(apiExecId || '')) {
             try { child.kill('SIGKILL'); } catch {}
@@ -150,19 +157,22 @@ export class TestExecutorAgent extends BaseAgent {
           summary = `Playwright execution failed: ${(err as Error).message}`;
         }
       });
+      if (apiExecId) { try { const ter = new TestExecutionRepository(this.database.getDatabase()); await ter.updateProgress(apiExecId, 1.0); } catch {} }
     }
 
     // Determine final report path (for UI static serving)
-    const finalReportPath = this.teConfig.execution.mode === 'simulate' ? singleHtmlPath : path.join(reportFolder, 'index.html');
+  const finalReportPath = this.teConfig.execution.mode === 'simulate' ? singleHtmlPath : path.join(reportFolder, 'index.html');
 
     // Persist execution report row (best-effort)
     try {
       await this.database.initialize();
       const repo = new ExecutionReportRepository(this.database.getDatabase());
+      // Use API execution id for linkage when available; otherwise fall back to internal run id
+      const linkedExecId = apiExecId || internalRunId;
       await repo.create({
-        id: execId,
-        execution_id: execId,
-  report_path: path.relative(projectRoot, finalReportPath).replace(/\\/g, '/'),
+        id: uuidv4(),
+        execution_id: linkedExecId,
+        report_path: path.relative(projectRoot, finalReportPath).replace(/\\/g, '/'),
         summary,
         status,
         created_at: new Date().toISOString(),
@@ -174,13 +184,23 @@ export class TestExecutorAgent extends BaseAgent {
 
     // Publish event and follow-ups only if not shutting down
     if (!this.isStopping) {
-      await this.publishEvent('execution.completed', { id: execId, status, reportPath: finalReportPath, summary });
+  await this.publishEvent('execution.completed', { id: apiExecId || internalRunId, status, reportPath: finalReportPath, summary });
+      // Notify ContextManager on failures to capture context for optimization
+  if (String(status) === 'failed' && apiExecId) {
+        try {
+          await this.sendMessage({
+            target: { type: 'ContextManager' },
+            messageType: 'EXECUTION_FAILURE',
+            payload: { executionId: apiExecId, summary }
+          });
+        } catch {}
+      }
       // Notify optimizer via MQ for further analysis
       try {
         await this.sendMessage({
           target: { type: 'TestOptimizer' },
           messageType: 'EXECUTION_RESULT',
-          payload: { executionId: execId, status, summary }
+          payload: { executionId: apiExecId || internalRunId, status, summary }
         });
       } catch (e) {
         this.log('warn', 'Failed to notify optimizer', { error: (e as Error)?.message });
@@ -190,7 +210,7 @@ export class TestExecutorAgent extends BaseAgent {
         await this.sendMessage({
           target: { type: 'ReportGenerator' },
           messageType: 'GENERATE_REPORT',
-          payload: { executionId: execId }
+          payload: { executionId: apiExecId || internalRunId }
         });
       } catch (e) {
         this.log('warn', 'Failed to request report generation', { error: (e as Error)?.message });

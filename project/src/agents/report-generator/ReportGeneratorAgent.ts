@@ -48,9 +48,9 @@ export class ReportGeneratorAgent extends BaseAgent {
       generatedAt: new Date().toISOString(),
     };
 
-    // Write JSON file under project/test_execution_reports
-    const projectRoot = process.cwd();
-    const outDir = path.resolve(projectRoot, 'project', this.outputDir);
+  // Write JSON file under <projectRoot>/test_execution_reports
+  const projectRoot = process.cwd();
+  const outDir = path.resolve(projectRoot, this.outputDir);
     await fs.mkdir(outDir, { recursive: true });
     const fileName = `${executionId}.summary.json`;
     const fullPath = path.join(outDir, fileName);
@@ -58,7 +58,8 @@ export class ReportGeneratorAgent extends BaseAgent {
 
     // Persist row in test_reports
     const id = uuidv4();
-    const relPath = path.relative(path.resolve(projectRoot, 'project'), fullPath).replace(/\\/g, '/');
+  // Persist paths relative to project root so server static mount `/reports-static` resolves correctly
+  const relPath = path.relative(projectRoot, fullPath).replace(/\\/g, '/');
     await this.reportsRepo.create({
       id,
       execution_id: executionId,

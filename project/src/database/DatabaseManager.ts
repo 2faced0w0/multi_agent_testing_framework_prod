@@ -127,6 +127,7 @@ export class DatabaseManager {
       browser TEXT,
       device TEXT,
       status TEXT,
+      progress REAL,
       startTime TEXT,
       result TEXT,
       artifacts TEXT,

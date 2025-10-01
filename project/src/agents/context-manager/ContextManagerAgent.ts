@@ -25,6 +25,9 @@ export class ContextManagerAgent extends BaseAgent {
       case 'UPDATE_CONTEXT':
         await this.handleUpdate(p);
         break;
+      case 'EXECUTION_FAILURE':
+        await this.handleExecutionFailure(p);
+        break;
       default:
         this['log']('debug', 'Ignoring message', { messageType: message.messageType });
     }
@@ -44,6 +47,23 @@ export class ContextManagerAgent extends BaseAgent {
   }
 
   private key(k: string) { return `${this.ns}:${k}`; }
+
+  private async handleExecutionFailure(p: any) {
+    const execId = p.executionId;
+    const summary = p.summary || '';
+    if (!execId) return;
+    // Record last failure context
+    try { await this.sharedMemory.set(this.key(`lastFailure:${execId}`), { summary, ts: Date.now() }, 3600); } catch {}
+    // Ask optimizer to schedule a re-run/regeneration cycle
+    try {
+      await this['publishEvent']('context.execution.failure', { executionId: execId, summary });
+      await this['sendMessage']({
+        target: { type: 'TestOptimizer' },
+        messageType: 'EXECUTION_RESULT',
+        payload: { executionId: execId, status: 'failed', summary }
+      });
+    } catch {}
+  }
 }
 
 export default ContextManagerAgent;

@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1
 
+# Playwright image version for runtime
+ARG PLAYWRIGHT_VERSION=1.55.1
+
 FROM node:20-slim AS base
 WORKDIR /app
 
@@ -14,14 +17,15 @@ COPY src ./src
 # Build
 RUN npm run build
 
-# Runtime
-FROM mcr.microsoft.com/playwright:v1.40.0-jammy AS runtime
+# Runtime with preinstalled browsers and dependencies
+FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-jammy AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# App files and prod deps
+# App files and prod deps (copy from build stage to avoid network in runtime)
 COPY --from=base /app/package*.json ./
-RUN npm ci --omit=dev
+COPY --from=base /app/node_modules ./node_modules
+RUN npm prune --omit=dev || true
 COPY --from=base /app/dist ./dist
 COPY public ./public
 

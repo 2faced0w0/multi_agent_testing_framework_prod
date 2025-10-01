@@ -55,19 +55,31 @@
         }
         ulr.append(li);
       });
-      // Open latest HTML report button
-      document.getElementById('open-latest').onclick = ()=>{
-        const html = data.reports.find((r)=> String(r.report_path||'').toLowerCase().endsWith('.html'));
-        if (!html) { alert('No HTML report found'); return; }
+      // Open latest HTML report button with polling while execution is pending
+      const openBtn = document.getElementById('open-latest');
+      function openLatest(reports){
+        const html = (reports||[]).find((r)=> String(r.report_path||'').toLowerCase().endsWith('.html'));
+        if (!html) return false;
         const rp = String(html.report_path||'').replace(/\\/g,'/');
-        // Prefer inline static route for HTML viewing
-        if (rp.startsWith('test_execution_reports/')) {
-          window.open(toStaticUrl(rp), '_blank');
-          return;
-        }
-        // Fallback to download endpoint
-        window.open(`/api/v1/reports/${encodeURIComponent(html.id)}/download`, '_blank');
-      };
+        if (rp.startsWith('test_execution_reports/')) { window.open(toStaticUrl(rp), '_blank'); return true; }
+        window.open(`/api/v1/gui/reports/${encodeURIComponent(html.id)}/download`, '_blank');
+        return true;
+      }
+      if (String(e.status).toLowerCase() === 'queued' || String(e.status).toLowerCase() === 'running') {
+        openBtn.disabled = true; openBtn.title = 'Report will be available after execution completes';
+        const poll = setInterval(async ()=>{
+          const r = await fetch(`/api/v1/gui/executions/${id}`).then(r=>r.ok?r.json():null);
+          if (!r) return;
+          const done = String(r.execution.status).toLowerCase();
+          if (done === 'passed' || done === 'failed' || done === 'canceled') {
+            clearInterval(poll);
+            openBtn.disabled = false; openBtn.title = '';
+            openBtn.onclick = ()=>{ if (!openLatest(r.reports)) alert('No HTML report found'); };
+          }
+        }, 3000);
+      } else {
+        openBtn.onclick = ()=>{ if (!openLatest(data.reports)) alert('No HTML report found'); };
+      }
       const ula = document.getElementById('arts');
       data.artifacts.forEach(a=>{
         const li = document.createElement('li'); li.textContent = `${a.type} – ${a.path}`; ula.append(li);

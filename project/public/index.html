@@ -55,6 +55,27 @@
         <h3>Recent Test Cases</h3>
         <ul id="tests"></ul>
       </div>
+      <div class="card">
+        <h3>Live Status</h3>
+        <div id="runtime">
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+            <button id="reset-queues" title="Clear default/high/critical queues and DLQ">Reset Queues</button>
+            <span id="reset-queues-status" class="hint"></span>
+          </div>
+          <div id="queue-stats"></div>
+          <div id="exec-counts"></div>
+          <div class="grid" style="grid-template-columns:1fr 1fr; gap:8px;">
+            <div>
+              <h4>Running</h4>
+              <ul id="running-list"></ul>
+            </div>
+            <div>
+              <h4>Queued</h4>
+              <ul id="queued-list"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <footer>

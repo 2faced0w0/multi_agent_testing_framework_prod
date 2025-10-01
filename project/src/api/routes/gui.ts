@@ -13,6 +13,8 @@ import { loadConfig } from '@api/config';
 import { MessageQueue } from '@communication/MessageQueue';
 import type { AgentMessage } from '@app-types/communication';
 import { v4 as uuidv4 } from 'uuid';
+import { metrics } from '@monitoring/Metrics';
+import send from 'send';
 
 const router = Router();
 
@@ -96,6 +98,23 @@ router.post('/watchers/:id/run', maybeAuth, maybeRequireRole(['admin','ops']), a
   }
 });
 
+// Remove/disengage a watcher
+router.delete('/watchers/:id', maybeAuth, maybeRequireRole(['admin','ops']), async (req: Request, res: Response) => {
+  try {
+    await ensureDatabaseInitialized();
+    const db = getDatabaseManager().getDatabase();
+    const repo = new WatchedRepoRepository(db);
+    const existing = await repo.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Watcher not found' });
+    const changes = await repo.deleteById(req.params.id);
+    metrics.inc('api_gui_watchers_delete_total');
+    return res.json({ removed: changes > 0 });
+  } catch (err: any) {
+    metrics.inc('api_gui_watchers_delete_errors_total');
+    return res.status(500).json({ error: 'Failed to remove watcher', details: err?.message });
+  }
+});
+
 // Dashboard summary
 router.get('/dashboard', maybeAuth, maybeRequireRole(['admin','ops','viewer']), async (_req: Request, res: Response) => {
   await ensureDatabaseInitialized();
@@ -121,6 +140,98 @@ router.get('/dashboard', maybeAuth, maybeRequireRole(['admin','ops','viewer']), 
   } as any;
 
   return res.json({ totals, executions, reports, tests, watchers });
+});
+
+// Runtime/queue/execution status for dashboard live section
+router.get('/runtime', maybeAuth, maybeRequireRole(['admin','ops','viewer']), async (_req: Request, res: Response) => {
+  await ensureDatabaseInitialized();
+  const db = getDatabaseManager().getDatabase();
+  const execRepo = new TestExecutionRepository(db);
+  let queues: Record<string, number> | null = null;
+  try {
+    const cfg = loadConfig();
+    const mq = new MessageQueue(cfg.messageQueue);
+    await mq.initialize();
+    queues = await mq.getQueueStats();
+    await mq.close();
+  } catch {
+    queues = null; // fail-open if Redis unavailable
+  }
+  const recent = await execRepo.getRecentExecutions(200);
+  const running = recent.filter((e: any) => e.status === 'running');
+  const queued = recent.filter((e: any) => e.status === 'queued');
+  const counts = recent.reduce((acc: any, e: any) => { acc[e.status] = (acc[e.status]||0)+1; return acc; }, {} as Record<string, number>);
+  return res.json({ queues, counts, running: running.slice(0, 20), queued: queued.slice(0, 20) });
+});
+
+// Reset/clear all queues & DLQ (admin/ops only)
+router.post('/runtime/reset-queues', maybeAuth, maybeRequireRole(['admin','ops']), async (_req: Request, res: Response) => {
+  try {
+    const cfg = loadConfig();
+    const mq = new MessageQueue(cfg.messageQueue);
+    await mq.initialize();
+    const result = await mq.resetAll();
+    await mq.close();
+    metrics.inc('api_gui_runtime_reset_queues_total');
+    return res.json({ ok: true, ...result });
+  } catch (err: any) {
+    metrics.inc('api_gui_runtime_reset_queues_errors_total');
+    return res.status(500).json({ ok: false, error: err?.message || 'failed' });
+  }
+});
+
+// Server-Sent Events stream for runtime updates
+router.get('/runtime/stream', maybeAuth, maybeRequireRole(['admin','ops','viewer']), async (req: Request, res: Response) => {
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  let closed = false;
+  req.on('close', () => { closed = true; });
+
+  const send = (event: string, data: any) => {
+    try {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    } catch { /* ignore */ }
+  };
+
+  // periodic push
+  const intervalMs = 2000;
+  const tick = async () => {
+    if (closed) return;
+    try {
+      await ensureDatabaseInitialized();
+      const db = getDatabaseManager().getDatabase();
+      const execRepo = new TestExecutionRepository(db);
+      let queues: Record<string, number> | null = null;
+      try {
+        const cfg = loadConfig();
+        const mq = new MessageQueue(cfg.messageQueue);
+        await mq.initialize();
+        queues = await mq.getQueueStats();
+        await mq.close();
+      } catch { queues = null; }
+      const recent = await execRepo.getRecentExecutions(200);
+      const running = recent.filter((e: any) => e.status === 'running');
+      const queued = recent.filter((e: any) => e.status === 'queued');
+      const counts = recent.reduce((acc: any, e: any) => { acc[e.status] = (acc[e.status]||0)+1; return acc; }, {} as Record<string, number>);
+      send('runtime', { queues, counts, running: running.slice(0, 20), queued: queued.slice(0, 20) });
+    } catch (e: any) {
+      send('error', { message: e?.message || 'tick-failed' });
+    }
+  };
+
+  // heartbeats so proxies keep connection open
+  const heart = setInterval(() => { if (!closed) res.write(':heartbeat\n\n'); }, 15000);
+  const poll = setInterval(() => { void tick(); }, intervalMs);
+  // initial push
+  void tick();
+
+  // cleanup when closed
+  req.on('close', () => { clearInterval(poll); clearInterval(heart); try { res.end(); } catch {} });
 });
 
 export default router;
@@ -170,4 +281,46 @@ router.get('/executions/:id/artifacts.zip', maybeAuth, maybeRequireRole(['admin'
     }
   }
   await archive.finalize();
+});
+
+// Resolve an execution_report by id (for GUI viewers)
+router.get('/reports/:id', maybeAuth, maybeRequireRole(['admin','ops','viewer']), async (req: Request, res: Response) => {
+  await ensureDatabaseInitialized();
+  const db = getDatabaseManager().getDatabase();
+  const repRepo = new ExecutionReportRepository(db);
+  const row = await repRepo.findById(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  return res.json({ report: row });
+});
+
+// Download an execution_report payload (HTML/JSON) by id
+router.get('/reports/:id/download', maybeAuth, maybeRequireRole(['admin','ops','viewer']), async (req: Request, res: Response) => {
+  await ensureDatabaseInitialized();
+  const db = getDatabaseManager().getDatabase();
+  const repRepo = new ExecutionReportRepository(db);
+  const row: any = await repRepo.findById(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const projectRoot = process.cwd();
+  const abs = path.resolve(projectRoot, row.report_path);
+  return send(req, abs).pipe(res);
+});
+
+// Toggle/update a watcher status (soft deactivate/activate)
+router.patch('/watchers/:id', maybeAuth, maybeRequireRole(['admin','ops']), async (req: Request, res: Response) => {
+  try {
+    const { status } = req.body || {};
+    const allowed = new Set(['active','inactive','pending','error']);
+    if (!status || !allowed.has(String(status))) return res.status(400).json({ error: 'Invalid status' });
+    await ensureDatabaseInitialized();
+    const db = getDatabaseManager().getDatabase();
+    const repo = new WatchedRepoRepository(db);
+    const existing = await repo.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Watcher not found' });
+    await repo.updateStatus(req.params.id, status);
+    metrics.inc('api_gui_watchers_patch_total');
+    return res.json({ id: req.params.id, status });
+  } catch (err: any) {
+    metrics.inc('api_gui_watchers_patch_errors_total');
+    return res.status(500).json({ error: 'Failed to update watcher', details: err?.message });
+  }
 });

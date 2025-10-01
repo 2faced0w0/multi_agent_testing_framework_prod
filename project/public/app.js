@@ -36,14 +36,23 @@ async function loadDashboard(params) {
         uiChip || '',
         ` — updated ${ts}`
       );
-      const btn = el('button', { style: 'margin-left:8px' }, 'Run Now');
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
+      const runBtn = el('button', { style: 'margin-left:8px' }, 'Run Now');
+      runBtn.addEventListener('click', async () => {
+        runBtn.disabled = true;
         try { await fetchJson(`/api/v1/gui/watchers/${w.id}/run`, { method: 'POST' }); alert('Queued'); }
         catch (e) { alert('Failed to queue: ' + e.message); }
-        finally { btn.disabled = false; }
+        finally { runBtn.disabled = false; }
       });
-      li.append(btn);
+      const toggleBtn = el('button', { style: 'margin-left:8px' }, (w.status === 'inactive' ? 'Enable' : 'Disable'));
+      toggleBtn.addEventListener('click', async () => {
+        toggleBtn.disabled = true;
+        try {
+          const newStatus = (w.status === 'inactive') ? 'active' : 'inactive';
+          await fetchJson(`/api/v1/gui/watchers/${w.id}`, { method: 'PATCH', body: JSON.stringify({ status: newStatus }) });
+          await loadDashboard({ status: statusSel.value || '', q: qInput.value || '' });
+        } catch (e) { alert('Failed to update: ' + e.message); } finally { toggleBtn.disabled = false; }
+      });
+      li.append(runBtn, toggleBtn);
       watchers.append(li);
     });
 
@@ -70,6 +79,51 @@ async function loadDashboard(params) {
     (data.tests || []).forEach((t) => {
       tests.append(el('li', null, `${t.title} – ${t.status || 'active'}`));
     });
+
+    // Runtime/live status
+    try {
+      const rt = await fetchJson('/api/v1/gui/runtime');
+      const qs = document.getElementById('queue-stats');
+      const ec = document.getElementById('exec-counts');
+      const runningList = document.getElementById('running-list');
+      const queuedList = document.getElementById('queued-list');
+      if (qs) {
+        qs.innerHTML = '';
+        if (rt.queues) {
+          const ul = el('ul');
+          Object.entries(rt.queues).forEach(([k, v]) => ul.append(el('li', null, `${k}: ${v}`)));
+          qs.append(ul);
+        } else {
+          qs.append(el('div', { class: 'hint' }, 'Queue stats unavailable'));
+        }
+      }
+      if (ec) {
+        ec.innerHTML = '';
+        const ul = el('ul');
+        Object.entries(rt.counts || {}).forEach(([k, v]) => ul.append(el('li', null, `${k}: ${v}`)));
+        ec.append(ul);
+      }
+      if (runningList) {
+        runningList.innerHTML = '';
+        (rt.running || []).forEach((x) => {
+          const chip = el('span', { class: 'chip warn' }, x.status);
+          const a = el('a', { href: `/execution.html?id=${encodeURIComponent(x.id)}`, target: '_blank' }, x.id);
+          const pct = typeof x.progress === 'number' ? Math.round(x.progress * 100) + '%' : '';
+          runningList.append(el('li', null, a, ' ', chip, pct ? ` — ${pct}` : ''));
+        });
+      }
+      if (queuedList) {
+        queuedList.innerHTML = '';
+        (rt.queued || []).forEach((x) => {
+          const chip = el('span', { class: 'chip' }, x.status);
+          const a = el('a', { href: `/execution.html?id=${encodeURIComponent(x.id)}`, target: '_blank' }, x.id);
+          const pct = typeof x.progress === 'number' ? Math.round(x.progress * 100) + '%' : '';
+          queuedList.append(el('li', null, a, ' ', chip, pct ? ` — ${pct}` : ''));
+        });
+      }
+    } catch (e) {
+      // ignore live status errors; keep dashboard usable
+    }
   } catch (e) {
     console.error('Dashboard error', e);
   }
@@ -103,5 +157,79 @@ document.getElementById('reset').addEventListener('click', ()=>{
   loadDashboard();
 });
 
+// Initialize dashboard
 loadDashboard();
+
+// Wire SSE for runtime live updates (with fetch fallback)
+try {
+  const es = new EventSource('/api/v1/gui/runtime/stream');
+  es.addEventListener('runtime', (evt) => {
+    try {
+      const rt = JSON.parse(evt.data);
+      const qs = document.getElementById('queue-stats');
+      const ec = document.getElementById('exec-counts');
+      const runningList = document.getElementById('running-list');
+      const queuedList = document.getElementById('queued-list');
+      if (qs) {
+        qs.innerHTML = '';
+        if (rt.queues) {
+          const ul = el('ul');
+          Object.entries(rt.queues).forEach(([k, v]) => ul.append(el('li', null, `${k}: ${v}`)));
+          qs.append(ul);
+        } else { qs.append(el('div', { class: 'hint' }, 'Queue stats unavailable')); }
+      }
+      if (ec) {
+        ec.innerHTML = '';
+        const ul = el('ul');
+        Object.entries(rt.counts || {}).forEach(([k, v]) => ul.append(el('li', null, `${k}: ${v}`)));
+        ec.append(ul);
+      }
+      if (runningList) {
+        runningList.innerHTML = '';
+        (rt.running || []).forEach((x) => {
+          const chip = el('span', { class: 'chip warn' }, x.status);
+          const a = el('a', { href: `/execution.html?id=${encodeURIComponent(x.id)}`, target: '_blank' }, x.id);
+          const pct = typeof x.progress === 'number' ? Math.round(x.progress * 100) + '%' : '';
+          runningList.append(el('li', null, a, ' ', chip, pct ? ` — ${pct}` : ''));
+        });
+      }
+      if (queuedList) {
+        queuedList.innerHTML = '';
+        (rt.queued || []).forEach((x) => {
+          const chip = el('span', { class: 'chip' }, x.status);
+          const a = el('a', { href: `/execution.html?id=${encodeURIComponent(x.id)}`, target: '_blank' }, x.id);
+          const pct = typeof x.progress === 'number' ? Math.round(x.progress * 100) + '%' : '';
+          queuedList.append(el('li', null, a, ' ', chip, pct ? ` — ${pct}` : ''));
+        });
+      }
+    } catch (e) { /* ignore bad frame */ }
+  });
+  es.addEventListener('error', () => { /* keep connection; fallback still active */ });
+} catch (e) {
+  // ignore if EventSource unsupported
+}
+
+// Keep periodic fetch as a fallback for totals/watchers/reports and runtime in case SSE drops
 setInterval(()=> loadDashboard({ status: statusSel.value || '', q: qInput.value || '' }), 10000);
+
+// Reset queues button wiring
+(function(){
+  const btn = document.getElementById('reset-queues');
+  const status = document.getElementById('reset-queues-status');
+  if (!btn) return;
+  btn.addEventListener('click', async ()=>{
+    btn.disabled = true; status.textContent = 'Resetting…';
+    try {
+      const res = await fetch('/api/v1/gui/runtime/reset-queues', { method: 'POST' });
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const data = await res.json();
+      status.textContent = data && data.ok ? 'Queues cleared' : 'Failed';
+      // Refresh runtime widgets quickly
+      await loadDashboard({ status: statusSel.value || '', q: qInput.value || '' });
+    } catch (e) {
+      status.textContent = 'Error: ' + (e?.message || 'failed');
+    } finally {
+      setTimeout(()=>{ status.textContent=''; btn.disabled = false; }, 2000);
+    }
+  });
+})();

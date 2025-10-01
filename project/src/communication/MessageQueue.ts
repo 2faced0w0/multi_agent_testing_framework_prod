@@ -114,4 +114,47 @@ export class MessageQueue {
     await this.client?.quit();
     this.client = null;
   }
+
+  /**
+   * Clear a list by key and return the number of items removed.
+   */
+  private async clearList(key: string): Promise<number> {
+    if (!this.client || !this.client.isOpen) throw new Error('MQ not initialized');
+    const len = Number(await this.client.lLen(key));
+    await this.client.del(key);
+    return len;
+  }
+
+  /**
+   * Delete keys by scanning with a given prefix. Returns number of deleted keys.
+   */
+  private async deleteByPrefix(prefix: string): Promise<number> {
+    if (!this.client || !this.client.isOpen) throw new Error('MQ not initialized');
+    let count = 0;
+    for await (const key of this.client.scanIterator({ MATCH: prefix + '*' })) {
+      await this.client.del(key as string);
+      count++;
+    }
+    return count;
+  }
+
+  /**
+   * Reset queues, DLQ, processing, attempts and audit log. Returns before/after stats and counts deleted.
+   */
+  async resetAll(): Promise<{ before: Record<string, number>; deleted: Record<string, number>; after: Record<string, number> }> {
+    if (!this.client || !this.client.isOpen) throw new Error('MQ not initialized');
+    const before = await this.getQueueStats();
+    const deleted: Record<string, number> = {};
+    // Clear queues and DLQ
+    deleted[this.cfg.queues.default] = await this.clearList(this.cfg.queues.default);
+    deleted[this.cfg.queues.high] = await this.clearList(this.cfg.queues.high);
+    deleted[this.cfg.queues.critical] = await this.clearList(this.cfg.queues.critical);
+    deleted[this.cfg.deadLetterQueue] = await this.clearList(this.cfg.deadLetterQueue);
+    // Clear processing and attempts and audit
+    deleted['processing'] = await this.deleteByPrefix(this.processingPrefix);
+    deleted['attempts'] = await this.deleteByPrefix(this.attemptsPrefix);
+    deleted['audit'] = await this.clearList(this.auditListKey);
+    const after = await this.getQueueStats();
+    return { before, deleted, after };
+  }
 }

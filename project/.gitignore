@@ -6,6 +6,10 @@ dist/
 coverage/
 tmp/
 
+# Generated artifacts
+generated_tests/
+test_execution_reports/
+
 # Environment & local config
 .env
 .env.*

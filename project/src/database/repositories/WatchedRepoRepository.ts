@@ -50,4 +50,10 @@ export class WatchedRepoRepository {
   async updateStatus(id: string, status: string): Promise<void> {
     await this.db.run(`UPDATE watched_repos SET status = ?, updated_at = ? WHERE id = ?`, status, new Date().toISOString(), id);
   }
+
+  async deleteById(id: string): Promise<number> {
+    const res: any = await this.db.run(`DELETE FROM watched_repos WHERE id = ?`, id);
+    // sqlite return changes in 'changes'
+    return Number(res?.changes || 0);
+  }
 }

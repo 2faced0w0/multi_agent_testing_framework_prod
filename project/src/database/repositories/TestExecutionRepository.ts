@@ -20,6 +20,7 @@ export class TestExecutionRepository {
       browser TEXT,
       device TEXT,
       status TEXT,
+      progress REAL,
       startTime TEXT,
       result TEXT,
       artifacts TEXT,
@@ -31,9 +32,9 @@ export class TestExecutionRepository {
     );`);
     await this.db.run(
       `INSERT INTO test_executions (
-        id, testCaseId, executionId, environment, browser, device, status, startTime, result,
+        id, testCaseId, executionId, environment, browser, device, status, progress, startTime, result,
         artifacts, logs, metrics, attemptNumber, maxAttempts, executedBy
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       exec.id,
       exec.testCaseId,
       exec.executionId,
@@ -41,6 +42,7 @@ export class TestExecutionRepository {
       exec.browser,
       exec.device,
       exec.status,
+      typeof exec.progress === 'number' ? exec.progress : 0,
       new Date(exec.startTime).toISOString(),
       JSON.stringify(exec.result || {}),
       JSON.stringify(exec.artifacts || []),
@@ -59,5 +61,9 @@ export class TestExecutionRepository {
   async countAll(): Promise<number> {
     const r: any = await this.db.get(`SELECT COUNT(1) as c FROM test_executions`);
     return r?.c || 0;
+  }
+
+  async updateProgress(id: string, progress: number) {
+    await this.db.run(`UPDATE test_executions SET progress = ? WHERE id = ?`, progress, id);
   }
 }
