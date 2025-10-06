@@ -21,8 +21,8 @@ This guide walks you through exercising every agent via the HTTP trigger endpoin
 ## Details Per Agent
 ### Test Writer
 - Endpoint: `POST /api/v1/agents/test-writer/generate`
-- Effect: Generates a test file in `generated_tests/` and enqueues an `EXECUTION_REQUEST` to TestExecutor.
-- Verify: Check new file in folder or watch `/metrics` for `matf_tests_generated_total` increment.
+- Effect: Uses Mistral AI (if `MISTRAL_API_KEY` + `MISTRAL_MODEL` set) to synthesize a high‑level Playwright test. Falls back to a deterministic placeholder when AI config is missing or an error occurs. Always enqueues an `EXECUTION_REQUEST` to TestExecutor after writing the file.
+- Verify: Check new file in `generated_tests/` (look for header `Generated Playwright Test (mistral)` vs `fallback`). Examine `/metrics` for increment (e.g., `tests_generated_total`).
 
 ### Test Executor
 - Triggered indirectly by Writer or by `/api/v1/tests/executions` POST.

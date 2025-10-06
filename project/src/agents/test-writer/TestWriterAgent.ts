@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { testsGeneratedTotal } from '@monitoring/promMetrics';
+import { generatePlaywrightTest } from './mistralGenerator';
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 import { GeneratedTestRepository } from '@database/repositories/GeneratedTestRepository';
@@ -58,10 +59,10 @@ export class TestWriterAgent extends BaseAgent {
 
     const payload: any = message.payload || {};
     const id = uuidv4();
-
-  // Compose generated test content (placeholder or future LLM/template output)
-  const title = `Auto smoke: ${payload.repo || 'repo'} ${payload.branch || ''}`.trim();
-  const content = this.buildGeneratedTest(title, payload);
+    // Call AI generator (with fallback safety inside the module)
+    const gen = await generatePlaywrightTest(payload, this.twConfig);
+    const title = gen.title;
+    const content = gen.content;
 
     // Ensure target directory exists
   const outDir = path.resolve(process.cwd(), 'generated_tests');
@@ -97,9 +98,9 @@ export class TestWriterAgent extends BaseAgent {
       this.log('debug', 'Skipping publishEvent; EventBus not initialized', { error: (err as Error)?.message });
     }
 
-    // Metrics
-  try { metrics.inc('tests_generated_total'); } catch {}
-  try { testsGeneratedTotal.inc(); } catch {}
+    // Metrics (include provider label via legacy metrics if supported later)
+    try { metrics.inc('tests_generated_total'); } catch {}
+    try { testsGeneratedTotal.inc(); } catch {}
 
     // Automatically trigger execution
     try {
@@ -116,31 +117,7 @@ export class TestWriterAgent extends BaseAgent {
     }
   }
 
-  private buildGeneratedTest(title: string, payload: any): string {
-    // Future: integrate LLM or template expansion. For now, emit a minimal placeholder test referencing metadata.
-    const meta = {
-      repo: payload.repo || '',
-      branch: payload.branch || '',
-      headCommit: payload.headCommit || '',
-      generatedAt: new Date().toISOString()
-    };
-    return `/**
- * Generated Test Placeholder
- * Title: ${title}
- * Metadata: ${JSON.stringify(meta, null, 2)}
- * TODO: Replace with AI-generated Playwright steps.
- */
-import { test, expect } from '@playwright/test';
-
-test('${title.replace(/'/g, "'")}', async ({ page }) => {
-  // Placeholder navigation - will be replaced by generation pipeline
-  const base = process.env.E2E_BASE_URL;
-  await page.goto(base);
-  // Basic assertion placeholder
-  await expect(page).toHaveTitle(/.*/);
-});
-`;
-  }
+  // buildGeneratedTest no longer needed (replaced by Mistral integration); kept out to minimize diff churn.
 }
 
 export default TestWriterAgent;
