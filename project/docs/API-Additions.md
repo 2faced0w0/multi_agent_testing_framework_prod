@@ -23,6 +23,13 @@ This document summarizes the latest API endpoints, messaging reliability enhance
 - Logs
   - GET /api/v1/system/logs
 
+- Agents (additions)
+  - POST /api/v1/agents/test-writer/generate/batch
+    - Body: { "items": [ { repo, branch, headCommit, changedFiles, compareUrl }... ], "priority"?: "high"|"critical" }
+    - Constraints: MAX_TEST_GENERATION_BATCH (default 10). Returns 400 if exceeded.
+    - Concurrency Guard: Rejects with 429 when total queued messages > MAX_TEST_GENERATION_INFLIGHT (default 50).
+    - Response: { status: 'queued', count, results: [{ index, messageId, mqError? }] }
+
 - System
   - GET /api/v1/system/metrics/queues (DB-backed stats)
   - GET /metrics (Prometheus text)
@@ -54,9 +61,20 @@ This document summarizes the latest API endpoints, messaging reliability enhance
 - MQ metrics:
   - mq_enqueue_total, mq_consume_total, mq_ack_total, mq_retry_total, mq_dlq_total
 
+- AI Generation metrics (Prometheus):
+  - matf_ai_requests_total{provider,model,status}
+    - status in [ok, error, empty, missing-config, sdk-missing]
+  - matf_ai_prompt_tokens_total{provider,model}
+  - matf_ai_completion_tokens_total{provider,model}
+
+- Test validation:
+  - Generated test now undergoes a lightweight TypeScript transpile check before auto execution enqueue.
+  - On compile error: execution enqueue is skipped; error logged (no new metric yet).
+
 All metrics are exposed via the existing /metrics endpoint.
 
 ## Notes
 
 - These changes are backward compatible with existing endpoints.
 - Consider adding dashboards based on the new metrics (Grafana JSON exists under project/docs/observability).
+- Batch generation allows rapid multi-scenario seeding while protecting system via queue depth guard.

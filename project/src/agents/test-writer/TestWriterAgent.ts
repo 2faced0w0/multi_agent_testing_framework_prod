@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { testsGeneratedTotal } from '@monitoring/promMetrics';
+import { testsGeneratedTotal, aiRequestsTotal } from '@monitoring/promMetrics';
 import { generatePlaywrightTest } from './mistralGenerator';
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
@@ -102,18 +102,36 @@ export class TestWriterAgent extends BaseAgent {
     try { metrics.inc('tests_generated_total'); } catch {}
     try { testsGeneratedTotal.inc(); } catch {}
 
-    // Automatically trigger execution
+    // Lightweight compile validation: attempt to transpile file using dynamic ts-node/register or tsc
+    let compileOk = true;
     try {
-      await this.sendMessage({
-        target: { type: 'TestExecutor' },
-        messageType: 'EXECUTION_REQUEST',
-        payload: {
-          // For CLI mode, executor runs all tests under testsDir; grep optional.
-          // We pass minimal payload for broad compatibility.
+      // Dynamic require to avoid hard dep path issues
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const ts = require('typescript') as typeof import('typescript');
+      const srcCode = await fs.readFile(filePath, 'utf8');
+      const transpile = ts.transpileModule(srcCode, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
+      if (transpile.diagnostics && transpile.diagnostics.length) {
+        const errs = transpile.diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error);
+        if (errs.length) {
+          compileOk = false;
+          this.log('error', 'Compilation errors in generated test; skipping execution enqueue', { errors: errs.map(e => e.messageText) });
         }
-      });
-    } catch (err) {
-      this.log('warn', 'Failed to enqueue execution request', { error: (err as Error)?.message });
+      }
+    } catch (e) {
+      // If the typescript module not found, do not block; log warning
+      this.log('warn', 'TypeScript validation unavailable; proceeding without compile check', { error: (e as Error)?.message });
+    }
+
+    if (compileOk) {
+      try {
+        await this.sendMessage({
+          target: { type: 'TestExecutor' },
+          messageType: 'EXECUTION_REQUEST',
+          payload: {}
+        });
+      } catch (err) {
+        this.log('warn', 'Failed to enqueue execution request', { error: (err as Error)?.message });
+      }
     }
   }
 

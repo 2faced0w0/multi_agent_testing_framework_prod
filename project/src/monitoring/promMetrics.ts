@@ -50,6 +50,23 @@ export const executionCancellationsTotal = new client.Counter({
   help: 'Executions cancelled'
 });
 
+// AI Token usage (model interactions)
+export const aiPromptTokensTotal = new client.Counter({
+  name: 'matf_ai_prompt_tokens_total',
+  help: 'Total prompt tokens sent to AI providers',
+  labelNames: ['provider','model'] as const
+});
+export const aiCompletionTokensTotal = new client.Counter({
+  name: 'matf_ai_completion_tokens_total',
+  help: 'Total completion tokens received from AI providers',
+  labelNames: ['provider','model'] as const
+});
+export const aiRequestsTotal = new client.Counter({
+  name: 'matf_ai_requests_total',
+  help: 'Total AI generation requests',
+  labelNames: ['provider','model','status'] as const
+});
+
 // Gauges
 export const queueDepthGauge = new client.Gauge({
   name: 'matf_queue_depth',
@@ -97,6 +114,9 @@ register.registerMetric(mqMessagesTotal);
 register.registerMetric(executionStartsTotal);
 register.registerMetric(executionCompletionsTotal);
 register.registerMetric(executionCancellationsTotal);
+register.registerMetric(aiPromptTokensTotal);
+register.registerMetric(aiCompletionTokensTotal);
+register.registerMetric(aiRequestsTotal);
 register.registerMetric(queueDepthGauge);
 register.registerMetric(executionsRunningGauge);
 register.registerMetric(executionsQueuedGauge);

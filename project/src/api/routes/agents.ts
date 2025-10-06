@@ -38,6 +38,44 @@ router.post('/test-writer/generate', async (req: Request, res: Response) => {
   return res.status(202).json({ status, messageId, mqError: mqError || undefined });
 });
 
+// Test Writer: batch generate tests
+router.post('/test-writer/generate/batch', async (req: Request, res: Response) => {
+  const { items, priority } = req.body || {};
+  if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items[] required' });
+  const maxBatch = Number(process.env.MAX_TEST_GENERATION_BATCH || 10);
+  if (items.length > maxBatch) return res.status(400).json({ error: `Batch size exceeds limit ${maxBatch}` });
+
+  // Concurrency guard: approximate inflight by current queue length across priority queues
+  const maxInflight = Number(process.env.MAX_TEST_GENERATION_INFLIGHT || 50);
+  try {
+    const mq = new MessageQueue(mqConfig());
+    await mq.initialize();
+    const stats = await mq.getQueueStats();
+    const totalQueued = Object.values(stats).reduce((a, b) => a + Number(b || 0), 0);
+    await mq.close();
+    if (totalQueued > maxInflight) {
+      metrics.inc('api_agents_test_writer_generate_total');
+      return res.status(429).json({ error: 'Too many generation requests in flight', queued: totalQueued, limit: maxInflight });
+    }
+  } catch (e) {
+    // If we cannot determine queue stats, proceed but note degraded mode
+  }
+
+  const results: Array<{ index: number; messageId: string; mqError?: string }> = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i] || {};
+    // Each item replicates single enqueue contract
+    const { messageId, mqError } = await enqueue({
+      target: { type: 'TestWriter' } as AgentIdentifier,
+      messageType: 'TEST_GENERATION_REQUEST',
+      payload: { repo: it.repo, branch: it.branch, headCommit: it.headCommit, changedFiles: it.changedFiles, compareUrl: it.compareUrl }
+    }, priority);
+    results.push({ index: i, messageId, mqError: mqError || undefined });
+  }
+  metrics.inc('api_agents_test_writer_generate_total');
+  return res.status(202).json({ status: 'queued', count: results.length, results });
+});
+
 // Locator Synthesis: synthesize locator candidates
 router.post('/locator/synthesize', async (req: Request, res: Response) => {
   const { element, context, requestId, priority } = req.body || {};

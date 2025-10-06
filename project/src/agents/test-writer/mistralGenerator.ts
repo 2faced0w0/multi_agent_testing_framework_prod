@@ -1,4 +1,5 @@
 import type { TestWriterAgentConfig } from './TestWriterAgent';
+import { aiPromptTokensTotal, aiCompletionTokensTotal, aiRequestsTotal } from '@monitoring/promMetrics';
 
 export interface GeneratedTestResult {
   title: string;
@@ -26,6 +27,7 @@ export async function generatePlaywrightTest(
   const model = cfg.mistral?.model;
 
   if (!apiKey || !model) {
+    try { aiRequestsTotal.inc({ provider: 'fallback', model: model || 'unset', status: 'missing-config' }); } catch {}
     return { ...buildFallback(baseTitle, metadata), provider: 'fallback', error: 'missing_api_key_or_model' };
   }
 
@@ -35,6 +37,7 @@ export async function generatePlaywrightTest(
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     MistralClient = require('@mistralai/mistralai').MistralClient;
   } catch (e) {
+    try { aiRequestsTotal.inc({ provider: 'fallback', model, status: 'sdk-missing' }); } catch {}
     return { ...buildFallback(baseTitle, metadata), provider: 'fallback', error: 'sdk_not_available' };
   }
 
@@ -58,20 +61,30 @@ Return ONLY the TypeScript test code. Use test.describe when appropriate, avoid 
     });
 
     const raw = extractContent(response);
+    const usage = response?.usage || {};
+    try {
+      const prompt = Number((usage.prompt_tokens as any) || usage.promptTokens || usage.input_tokens || 0);
+      const completion = Number((usage.completion_tokens as any) || usage.completionTokens || usage.output_tokens || 0);
+      if (prompt) aiPromptTokensTotal.inc({ provider: 'mistral', model }, prompt);
+      if (completion) aiCompletionTokensTotal.inc({ provider: 'mistral', model }, completion);
+    } catch {}
     if (!raw) {
+      try { aiRequestsTotal.inc({ provider: 'mistral', model, status: 'empty' }); } catch {}
       return { ...buildFallback(baseTitle, metadata), provider: 'fallback', error: 'empty_model_response' };
     }
 
     const wrapped = ensureTestWrapper(raw, baseTitle, metadata);
+    try { aiRequestsTotal.inc({ provider: 'mistral', model, status: 'ok' }); } catch {}
     return {
       title: baseTitle,
       content: wrapped,
       model,
       finishReason: response?.choices?.[0]?.finish_reason,
-      usage: response?.usage,
+      usage: usage,
       provider: 'mistral'
     };
   } catch (err: any) {
+    try { aiRequestsTotal.inc({ provider: 'mistral', model, status: 'error' }); } catch {}
     return { ...buildFallback(baseTitle, metadata), provider: 'fallback', error: err?.message || 'generation_error' };
   }
 }
