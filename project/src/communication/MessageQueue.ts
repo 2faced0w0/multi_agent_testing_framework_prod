@@ -1,6 +1,7 @@
 import { createClient, RedisClientType } from 'redis';
 import { AgentMessage } from '@app-types/communication';
 import { metrics } from '@monitoring/Metrics';
+import { mqMessagesTotal, queueWaitDuration } from '@monitoring/promMetrics';
 
 export interface MessageQueueConfig {
   redis: { host: string; port: number; db: number; password?: string };
@@ -48,7 +49,8 @@ export class MessageQueue {
     // Audit log
   await this.client.lPush(this.auditListKey, JSON.stringify({ type: 'send', ts: Date.now(), queue, msgId: (msg as any).id, target: msg.target, messageType: (msg as any).messageType }));
     await this.client.lTrim(this.auditListKey, 0, this.auditMaxLen - 1);
-    metrics.inc('mq_enqueue_total');
+  metrics.inc('mq_enqueue_total');
+  try { mqMessagesTotal.inc({ action: 'enqueued' }); } catch {}
   }
 
   async acknowledgeMessage(messageId: string): Promise<void> {
@@ -57,7 +59,8 @@ export class MessageQueue {
     await this.client.del(this.attemptsPrefix + messageId);
     await this.client.lPush(this.auditListKey, JSON.stringify({ type: 'ack', ts: Date.now(), messageId }));
     await this.client.lTrim(this.auditListKey, 0, this.auditMaxLen - 1);
-    metrics.inc('mq_ack_total');
+  metrics.inc('mq_ack_total');
+  try { mqMessagesTotal.inc({ action: 'acked' }); } catch {}
   }
 
   // BLPOP with retry and DLQ handling for a set of queues in priority order
@@ -67,7 +70,12 @@ export class MessageQueue {
   const res = await this.client.blPop(keys, timeoutSeconds);
   if (!res) return null;
     const { key, element } = res as any;
-    const msg: AgentMessage & { id?: string } = JSON.parse(element);
+    const msg: AgentMessage & { id?: string; enqueuedAt?: number } = JSON.parse(element);
+    // Observe queue wait if we have the original enqueue timestamp
+    if (msg.enqueuedAt && typeof msg.enqueuedAt === 'number') {
+      const waitSeconds = (Date.now() - msg.enqueuedAt) / 1000;
+      try { queueWaitDuration.observe(waitSeconds); } catch {}
+    }
     const messageId = msg.id || `${Date.now()}-${Math.random()}`;
   await this.client.set(this.processingPrefix + messageId, JSON.stringify({ key, element, startedAt: Date.now() }), { PX: 1000 * 60 * 10 });
   await this.client.lPush(this.auditListKey, JSON.stringify({ type: 'consume', ts: Date.now(), queue: key, messageId }));
@@ -77,7 +85,8 @@ export class MessageQueue {
     const attempts = Number((await this.client.incr(attemptsKey)) || 1);
     await this.client.expire(attemptsKey, 60 * 60);
     (msg as any)._mq = { messageId, attempts, sourceQueue: key };
-    metrics.inc('mq_consume_total');
+  metrics.inc('mq_consume_total');
+  try { mqMessagesTotal.inc({ action: 'consumed' }); } catch {}
     return msg as AgentMessage;
   }
 
@@ -89,7 +98,8 @@ export class MessageQueue {
       await this.client.lPush(this.cfg.deadLetterQueue, JSON.stringify({ msg, failedAt: Date.now(), attempts }));
       await this.client.lPush(this.auditListKey, JSON.stringify({ type: 'dlq', ts: Date.now(), messageId, attempts }));
       await this.client.lTrim(this.auditListKey, 0, this.auditMaxLen - 1);
-      metrics.inc('mq_dlq_total');
+  metrics.inc('mq_dlq_total');
+  try { mqMessagesTotal.inc({ action: 'dlq' }); } catch {}
       await this.acknowledgeMessage(messageId);
       return;
     }
@@ -99,7 +109,8 @@ export class MessageQueue {
     await this.client.lPush(queue, JSON.stringify({ ...msg, retriedAt: Date.now(), attempts }));
     await this.client.lPush(this.auditListKey, JSON.stringify({ type: 'retry', ts: Date.now(), queue, messageId, attempts }));
     await this.client.lTrim(this.auditListKey, 0, this.auditMaxLen - 1);
-    metrics.inc('mq_retry_total');
+  metrics.inc('mq_retry_total');
+  try { mqMessagesTotal.inc({ action: 'retried' }); } catch {}
     await this.client.del(this.processingPrefix + messageId);
   }
 

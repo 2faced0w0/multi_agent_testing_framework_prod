@@ -1,0 +1,21 @@
+{
+  "title": "MATF Extended Overview",
+  "schemaVersion": 36,
+  "version": 1,
+  "tags": ["matf","testing"],
+  "timezone": "browser",
+  "panels": [
+    {"type":"stat","title":"Executions Passed (total)","gridPos":{"x":0,"y":0,"w":4,"h":3},"targets":[{"expr":"sum(matf_execution_completions_total{status=\"passed\"})","refId":"A"}]},
+    {"type":"stat","title":"Executions Failed (total)","gridPos":{"x":4,"y":0,"w":4,"h":3},"targets":[{"expr":"sum(matf_execution_completions_total{status=\"failed\"})","refId":"A"}]},
+    {"type":"stat","title":"Queued Executions","gridPos":{"x":8,"y":0,"w":4,"h":3},"targets":[{"expr":"matf_executions_queued","refId":"A"}]},
+    {"type":"stat","title":"Running Executions","gridPos":{"x":12,"y":0,"w":4,"h":3},"targets":[{"expr":"matf_executions_running","refId":"A"}]},
+    {"type":"timeseries","title":"HTTP Request Rate","gridPos":{"x":0,"y":3,"w":8,"h":6},"targets":[{"expr":"sum by (route) (rate(matf_http_requests_total[5m]))","refId":"A"}]},
+    {"type":"timeseries","title":"HTTP Error Rate","gridPos":{"x":8,"y":3,"w":8,"h":6},"targets":[{"expr":"sum(rate(matf_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(matf_http_requests_total[5m])),1)","refId":"A"}]},
+    {"type":"timeseries","title":"HTTP Latency P95","gridPos":{"x":0,"y":9,"w":8,"h":6},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(matf_http_request_duration_seconds_bucket[5m])))","refId":"A"}]},
+    {"type":"timeseries","title":"Execution Duration P95","gridPos":{"x":8,"y":9,"w":8,"h":6},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(matf_execution_duration_seconds_bucket[10m])))","refId":"A"}]},
+    {"type":"timeseries","title":"Queue Depth (per queue)","gridPos":{"x":0,"y":15,"w":8,"h":6},"targets":[{"expr":"matf_queue_depth","refId":"A"}]},
+    {"type":"timeseries","title":"Queue Wait P95","gridPos":{"x":8,"y":15,"w":8,"h":6},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(matf_queue_wait_seconds_bucket[10m])))","refId":"A"}]},
+    {"type":"timeseries","title":"Executions per Status","gridPos":{"x":0,"y":21,"w":8,"h":6},"targets":[{"expr":"sum by (status) (rate(matf_execution_completions_total[10m]))","refId":"A"}]},
+    {"type":"timeseries","title":"MQ Events by Action","gridPos":{"x":8,"y":21,"w":8,"h":6},"targets":[{"expr":"sum by (action) (rate(matf_mq_messages_total[5m]))","refId":"A"}]}
+  ]
+}

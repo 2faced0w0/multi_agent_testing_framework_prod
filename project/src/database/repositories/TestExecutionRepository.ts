@@ -30,6 +30,16 @@ export class TestExecutionRepository {
       maxAttempts INTEGER,
       executedBy TEXT
     );`);
+    // Ensure 'progress' column exists for legacy DBs
+    try {
+      const cols: any[] = await (this.db as any).all(`PRAGMA table_info('test_executions')`);
+      const hasProgress = Array.isArray(cols) && cols.some((c: any) => String(c.name) === 'progress');
+      if (!hasProgress) {
+        await this.db.exec(`ALTER TABLE test_executions ADD COLUMN progress REAL DEFAULT 0`);
+      }
+    } catch {
+      // ignore
+    }
     await this.db.run(
       `INSERT INTO test_executions (
         id, testCaseId, executionId, environment, browser, device, status, progress, startTime, result,

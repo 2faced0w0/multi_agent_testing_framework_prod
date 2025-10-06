@@ -57,6 +57,7 @@
     "morgan": "^1.10.0",
     "pino": "^8.16.1",
   "playwright": "^1.55.1",
+    "prom-client": "^15.1.0",
     "redis": "^4.6.10",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.6",

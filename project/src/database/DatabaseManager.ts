@@ -137,6 +137,16 @@ export class DatabaseManager {
       maxAttempts INTEGER,
       executedBy TEXT
     );`);
+    // Lightweight migration: add missing columns for existing databases
+    try {
+      const cols: Array<{ name: string }> = await (this.db as any).all(`PRAGMA table_info('test_executions')`);
+      const hasProgress = Array.isArray(cols) && cols.some(c => String((c as any).name) === 'progress');
+      if (!hasProgress) {
+        await this.db.exec(`ALTER TABLE test_executions ADD COLUMN progress REAL DEFAULT 0`);
+      }
+    } catch {
+      // best-effort: ignore pragma/alter failures
+    }
     // Recommendations suggested by TestOptimizerAgent
     await this.db.exec(`CREATE TABLE IF NOT EXISTS optimization_recommendations (
       id TEXT PRIMARY KEY,

@@ -7,6 +7,7 @@ import type { AgentMessage } from '@app-types/communication';
 import { ExecutionReportRepository } from '@database/repositories/ExecutionReportRepository';
 import { TestExecutionRepository } from '@database/repositories/TestExecutionRepository';
 import { metrics } from '@monitoring/Metrics';
+import { executionStartsTotal, executionCompletionsTotal, testsExecutedTotal, executionDuration, queueWaitDuration } from '@monitoring/promMetrics';
 
 export type TestExecutorAgentConfig = BaseAgentConfig & {
   execution: {
@@ -69,6 +70,7 @@ export class TestExecutorAgent extends BaseAgent {
   // Internal unique id for this run context (used only when we don't have an API execution id)
   const internalRunId = uuidv4();
   const startedAt = new Date();
+  try { executionStartsTotal.inc(); } catch {}
   const apiExecId = (payload?.data?.executionId as string | undefined) || (payload?.executionId as string | undefined);
     // Mark running if we have a corresponding API execution row
     if (apiExecId) {
@@ -91,7 +93,7 @@ export class TestExecutorAgent extends BaseAgent {
     let status: 'passed' | 'failed' | 'skipped' = 'passed';
     let summary = '';
 
-    if (this.cancellations.has(apiExecId || '')) {
+  if (this.cancellations.has(apiExecId || '')) {
       status = 'skipped';
       summary = 'Execution canceled before start';
       if (apiExecId) {
@@ -221,6 +223,13 @@ export class TestExecutorAgent extends BaseAgent {
     try {
       metrics.inc('tests_executed_total');
       if (status !== 'passed') metrics.inc('generation_failures_total');
+    } catch {}
+    // Prom-client metrics
+    try {
+      testsExecutedTotal.inc({ status });
+      executionCompletionsTotal.inc({ status });
+      const durSec = (Date.now() - startedAt.getTime())/1000;
+      executionDuration.observe({ status }, durSec);
     } catch {}
 
     // Cleanup cancellation flag

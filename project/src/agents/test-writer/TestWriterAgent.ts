@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { testsGeneratedTotal } from '@monitoring/promMetrics';
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 import { GeneratedTestRepository } from '@database/repositories/GeneratedTestRepository';
@@ -58,9 +59,9 @@ export class TestWriterAgent extends BaseAgent {
     const payload: any = message.payload || {};
     const id = uuidv4();
 
-    // Compose basic Playwright test content as MVP (fallback when no Mistral)
-    const title = `Auto smoke: ${payload.repo || 'repo'} ${payload.branch || ''}`.trim();
-    const content = this.renderBasicPlaywrightTest(title);
+  // Compose generated test content (placeholder or future LLM/template output)
+  const title = `Auto smoke: ${payload.repo || 'repo'} ${payload.branch || ''}`.trim();
+  const content = this.buildGeneratedTest(title, payload);
 
     // Ensure target directory exists
   const outDir = path.resolve(process.cwd(), 'generated_tests');
@@ -97,7 +98,8 @@ export class TestWriterAgent extends BaseAgent {
     }
 
     // Metrics
-    try { metrics.inc('tests_generated_total'); } catch {}
+  try { metrics.inc('tests_generated_total'); } catch {}
+  try { testsGeneratedTotal.inc(); } catch {}
 
     // Automatically trigger execution
     try {
@@ -114,12 +116,27 @@ export class TestWriterAgent extends BaseAgent {
     }
   }
 
-  private renderBasicPlaywrightTest(title: string): string {
-    // Simple, stable TS Playwright test skeleton; can be replaced by Mistral results later
-    return `import { test, expect } from '@playwright/test';
+  private buildGeneratedTest(title: string, payload: any): string {
+    // Future: integrate LLM or template expansion. For now, emit a minimal placeholder test referencing metadata.
+    const meta = {
+      repo: payload.repo || '',
+      branch: payload.branch || '',
+      headCommit: payload.headCommit || '',
+      generatedAt: new Date().toISOString()
+    };
+    return `/**
+ * Generated Test Placeholder
+ * Title: ${title}
+ * Metadata: ${JSON.stringify(meta, null, 2)}
+ * TODO: Replace with AI-generated Playwright steps.
+ */
+import { test, expect } from '@playwright/test';
 
-test('${title.replace(/'/g, "\'")}', async ({ page }) => {
-  await page.goto(process.env.E2E_BASE_URL || 'https://example.org');
+test('${title.replace(/'/g, "'")}', async ({ page }) => {
+  // Placeholder navigation - will be replaced by generation pipeline
+  const base = process.env.E2E_BASE_URL;
+  await page.goto(base);
+  // Basic assertion placeholder
   await expect(page).toHaveTitle(/.*/);
 });
 `;

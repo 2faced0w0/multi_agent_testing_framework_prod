@@ -1,0 +1,106 @@
+{
+  "info": {
+    "name": "MATF API & Agents",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0",
+    "description": "Postman collection covering core API and direct agent trigger endpoints for the Multi-Agent Testing Framework."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" }
+  ],
+  "item": [
+    {
+      "name": "System Health",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/system/health" }
+    },
+    {
+      "name": "List Executions",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/tests/executions" }
+    },
+    {
+      "name": "Enqueue Execution",
+      "request": {
+        "method": "POST",
+        "header": [ {"key": "Content-Type", "value": "application/json"} ],
+        "body": { "mode": "raw", "raw": "{\n  \"testCaseId\": \"smoke-home\",\n  \"environment\": \"staging\",\n  \"browser\": \"chromium\",\n  \"device\": \"desktop\",\n  \"priority\": \"normal\"\n}" },
+        "url": "{{baseUrl}}/api/v1/tests/executions"
+      }
+    },
+    {
+      "name": "Cancel Execution",
+      "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/tests/executions/{{executionId}}/cancel" },
+      "event": [ { "listen": "prerequest", "script": { "exec": ["// Set executionId variable in Postman before using this request"], "type": "text/javascript" } } ]
+    },
+    {
+      "name": "Test Writer - Generate",
+      "request": {
+        "method": "POST",
+        "header": [ {"key": "Content-Type", "value": "application/json"} ],
+        "body": { "mode": "raw", "raw": "{\n  \"repo\": \"example/repo\",\n  \"branch\": \"main\",\n  \"headCommit\": \"abc123\",\n  \"changedFiles\": [\"src/app.ts\"],\n  \"compareUrl\": \"https://example.org/compare/abc...def\"\n}" },
+        "url": "{{baseUrl}}/api/v1/agents/test-writer/generate"
+      }
+    },
+    {
+      "name": "Locator - Synthesize",
+      "request": {
+        "method": "POST",
+        "header": [ {"key": "Content-Type", "value": "application/json"} ],
+        "body": { "mode": "raw", "raw": "{\n  \"element\": { \"role\": \"button\", \"name\": \"Submit\", \"id\": \"submit-btn\" },\n  \"context\": { \"page\": \"/login\" }\n}" },
+        "url": "{{baseUrl}}/api/v1/agents/locator/synthesize"
+      }
+    },
+    {
+      "name": "Context - Get",
+      "request": {
+        "method": "POST",
+        "header": [ {"key": "Content-Type", "value": "application/json"} ],
+        "body": { "mode": "raw", "raw": "{\n  \"key\": \"lastFailure:some-exec-id\"\n}" },
+        "url": "{{baseUrl}}/api/v1/agents/context/get"
+      }
+    },
+    {
+      "name": "Context - Update",
+      "request": {
+        "method": "POST",
+        "header": [ {"key": "Content-Type", "value": "application/json"} ],
+        "body": { "mode": "raw", "raw": "{\n  \"key\": \"demoKey\",\n  \"value\": { \"foo\": \"bar\" },\n  \"ttl\": 3600\n}" },
+        "url": "{{baseUrl}}/api/v1/agents/context/update"
+      }
+    },
+    {
+      "name": "Report - Generate",
+      "request": {
+        "method": "POST",
+        "header": [ {"key": "Content-Type", "value": "application/json"} ],
+        "body": { "mode": "raw", "raw": "{\n  \"executionId\": \"<replace-with-execution-id>\"\n}" },
+        "url": "{{baseUrl}}/api/v1/agents/report/generate"
+      }
+    },
+    {
+      "name": "Optimizer - Optimize Recent",
+      "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/agents/optimizer/optimize" }
+    },
+    {
+      "name": "Logger - Custom Log",
+      "request": {
+        "method": "POST",
+        "header": [ {"key": "Content-Type", "value": "application/json"} ],
+        "body": { "mode": "raw", "raw": "{\n  \"level\": \"info\",\n  \"message\": \"Manual log from Postman\",\n  \"context\": { \"source\": \"postman-test\" },\n  \"tags\": [\"manual\"],\n  \"correlation_id\": \"corr-123\"\n}" },
+        "url": "{{baseUrl}}/api/v1/agents/logger/log"
+      }
+    },
+    {
+      "name": "Logger - Query Logs",
+      "request": {
+        "method": "POST",
+        "header": [ {"key": "Content-Type", "value": "application/json"} ],
+        "body": { "mode": "raw", "raw": "{\n  \"level\": \"info\",\n  \"query\": \"Manual log\",\n  \"limit\": 25\n}" },
+        "url": "{{baseUrl}}/api/v1/agents/logger/query"
+      }
+    },
+    {
+      "name": "Metrics (Prometheus)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/metrics" }
+    }
+  ]
+}
