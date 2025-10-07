@@ -16,6 +16,7 @@ import { metrics } from '@monitoring/Metrics';
 import { register, httpRequestsTotal, httpRequestDuration, httpRequestErrorsTotal, normalizeRoute, queueDepthGauge, executionsRunningGauge, executionsQueuedGauge } from '@monitoring/promMetrics';
 import { MessageQueue } from '@communication/MessageQueue';
 import { loadConfig } from './config';
+import { seedGuiIfRequested } from './seed/guiSeed';
 
 const app = express();
 
@@ -133,6 +134,9 @@ if (require.main === module) {
     // eslint-disable-next-line no-console
     console.log(`API server listening on http://localhost:${PORT}`);
   });
+
+  // Development GUI seeding (idempotent)
+  seedGuiIfRequested().catch(()=>{/* ignore seed errors */});
 
   // Periodic queue depth + execution state sampling
   const cfg = loadConfig();

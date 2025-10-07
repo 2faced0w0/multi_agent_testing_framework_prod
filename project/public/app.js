@@ -12,6 +12,8 @@ function el(tag, attrs, ...children) {
 }
 
 async function loadDashboard(params) {
+  const errBanner = document.getElementById('dashboard-error');
+  if (errBanner) errBanner.textContent = '';
   try {
     const data = await fetchJson('/api/v1/gui/dashboard');
     const totals = document.getElementById('totals');
@@ -126,7 +128,49 @@ async function loadDashboard(params) {
     }
   } catch (e) {
     console.error('Dashboard error', e);
+    if (errBanner) errBanner.textContent = 'Dashboard load failed: ' + (e?.message || 'error');
   }
+}
+
+async function refreshWatchersOnly(params){
+  try {
+    const watchers = document.getElementById('watchers');
+    if(!watchers) return;
+    watchers.innerHTML = '';
+    const q = new URLSearchParams(params||{});
+    const watchersData = await fetchJson('/api/v1/gui/watchers' + (q.toString()? ('?'+q.toString()):''));
+    (watchersData.items || []).forEach((w) => {
+      const ts = w.updated_at ? new Date(w.updated_at).toLocaleString() : '';
+      const statusChip = el('span', { class: 'chip ' + (w.status==='active'?'ok':w.status==='pending'?'warn':'err') }, w.status);
+      const uiChanged = (()=>{ try { return JSON.parse(w.last_event||'{}').uiChanged; } catch { return false; } })();
+      const uiChip = uiChanged ? el('span', { class: 'chip ok' }, 'UI change detected') : null;
+      const li = el('li', null,
+        `${w.full_name} [${w.default_branch}] `,
+        statusChip,
+        uiChip ? ' ' : '',
+        uiChip || '',
+        ` — updated ${ts}`
+      );
+      const runBtn = el('button', { style: 'margin-left:8px' }, 'Run Now');
+      runBtn.addEventListener('click', async () => {
+        runBtn.disabled = true; runBtn.textContent = 'Queuing...';
+        try { await fetchJson(`/api/v1/gui/watchers/${w.id}/run`, { method: 'POST' }); runBtn.textContent = 'Queued'; setTimeout(()=>{ runBtn.textContent='Run Now'; },1500); }
+        catch (e) { alert('Failed to queue: ' + e.message); }
+        finally { runBtn.disabled = false; await refreshWatchersOnly(params); }
+      });
+      const toggleBtn = el('button', { style: 'margin-left:8px' }, (w.status === 'inactive' ? 'Enable' : 'Disable'));
+      toggleBtn.addEventListener('click', async () => {
+        toggleBtn.disabled = true;
+        try {
+          const newStatus = (w.status === 'inactive') ? 'active' : 'inactive';
+          await fetchJson(`/api/v1/gui/watchers/${w.id}`, { method: 'PATCH', body: JSON.stringify({ status: newStatus }) });
+          await refreshWatchersOnly({ status: statusSel.value || '', q: qInput.value || '' });
+        } catch (e) { alert('Failed to update: ' + e.message); } finally { toggleBtn.disabled = false; }
+      });
+      li.append(runBtn, toggleBtn);
+      watchers.append(li);
+    });
+  } catch(e){ /* ignore */ }
 }
 
 async function onSubmitWatch(evt) {
