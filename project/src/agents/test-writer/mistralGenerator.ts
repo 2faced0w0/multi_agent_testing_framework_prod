@@ -1,5 +1,6 @@
 import type { TestWriterAgentConfig } from './TestWriterAgent';
 import { aiPromptTokensTotal, aiCompletionTokensTotal, aiRequestsTotal } from '@monitoring/promMetrics';
+import { componentAnalysisService } from '../../services/ComponentAnalysisService';
 
 export interface GeneratedTestResult {
   title: string;
@@ -35,16 +36,29 @@ export async function generatePlaywrightTest(
   let MistralClient: any;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    MistralClient = require('@mistralai/mistralai').MistralClient;
+  const mod = require('@mistralai/mistralai');
+  MistralClient = mod.MistralClient || mod.default || mod;
   } catch (e) {
     try { aiRequestsTotal.inc({ provider: 'fallback', model, status: 'sdk-missing' }); } catch {}
     return { ...buildFallback(baseTitle, metadata), provider: 'fallback', error: 'sdk_not_available' };
   }
 
-  const systemPrompt = `You are an assistant that generates concise, robust Playwright tests. 
-Return ONLY the TypeScript test code. Use test.describe when appropriate, avoid extraneous commentary.`;
+  const systemPrompt = `You are an expert test automation engineer specializing in creating comprehensive, maintainable Playwright tests. 
 
-  const userPrompt = buildUserPrompt(baseTitle, metadata);
+Key principles:
+- Generate tests that focus on user behavior and component functionality
+- Use semantic selectors (getByRole, getByLabel, getByTestId) over brittle CSS selectors
+- Create tests that are resilient to UI changes but catch real regressions
+- Include proper setup, cleanup, and error handling
+- Test both happy paths and edge cases
+- Consider accessibility, responsive design, and performance
+- Write self-documenting test names and descriptions
+- Use Page Object Model patterns when beneficial
+- Include proper wait strategies and assertions
+
+Return ONLY the TypeScript test code using @playwright/test. No explanations or comments outside the code.`;
+
+  const userPrompt = await buildUserPrompt(baseTitle, metadata);
 
   try {
     const client = new MistralClient(apiKey);
@@ -89,22 +103,127 @@ Return ONLY the TypeScript test code. Use test.describe when appropriate, avoid 
   }
 }
 
-function buildUserPrompt(title: string, meta: Record<string, any>): string {
+async function buildUserPrompt(title: string, meta: Record<string, any>): Promise<string> {
   const changed = (meta.changedFiles || []).slice(0, 10).join('\n');
-  return `Generate a Playwright test for the application under test.
-Title: ${title}
-Repo: ${meta.repo || ''}
-Branch: ${meta.branch || ''}
-HeadCommit: ${meta.headCommit || ''}
-CompareUrl: ${meta.compareUrl || ''}
-ChangedFiles (top):\n${changed}
+  const baseUrl = meta.compareUrl || process.env.E2E_BASE_URL || 'http://localhost:3000';
+  
+  // Get component analysis if repository URL is available
+  let componentAnalysis = 'No specific component analysis available.';
+  let selectorRecommendations = '';
+  
+  if (meta.repo && meta.changedFiles && meta.changedFiles.length > 0) {
+    try {
+      const analyses = await componentAnalysisService.analyzeChangedComponents(
+        meta.repo,
+        meta.changedFiles,
+        meta.branch
+      );
+      
+      if (analyses.length > 0) {
+        componentAnalysis = analyses.map(analysis => `
+• ${analysis.componentName} (${analysis.componentType} component):
+  - Props: ${analysis.props.length > 0 ? analysis.props.join(', ') : 'none detected'}
+  - Hooks: ${analysis.hooks.length > 0 ? analysis.hooks.join(', ') : 'none detected'}
+  - Elements: ${analysis.elements.map(e => e.tag).join(', ')}
+  - Test Selectors Available: ${analysis.testSelectors.length} selectors generated`).join('\n');
+
+        // Generate selector recommendations
+        const allSelectors = analyses.flatMap(a => a.testSelectors);
+        const highConfidenceSelectors = allSelectors.filter(s => s.confidence > 0.7);
+        
+        if (highConfidenceSelectors.length > 0) {
+          selectorRecommendations = `
+Recommended Test Selectors (high confidence):
+${highConfidenceSelectors.map(s => `- page.locator('${s.value}') // ${s.element} (${s.type})`).join('\n')}`;
+        }
+      }
+    } catch (error) {
+      console.warn('Component analysis failed:', error);
+      componentAnalysis = analyzeComponentFilesBasic(meta.changedFiles || []);
+    }
+  } else {
+    componentAnalysis = analyzeComponentFilesBasic(meta.changedFiles || []);
+  }
+  
+  return `Generate a comprehensive Playwright test for the application under test.
+
+Project Context:
+- Title: ${title}
+- Repository: ${meta.repo || ''}
+- Branch: ${meta.branch || ''}
+- Commit: ${meta.headCommit || ''}
+- Target URL: ${baseUrl}
+
+Changed Files:
+${changed}
+
+Component Analysis:
+${componentAnalysis}
+${selectorRecommendations}
+
 Requirements:
- - Use TypeScript.
- - Use @playwright/test.
- - Include at least one assertion that is resilient (e.g., locator expectations).
- - Avoid hard-coding environment-specific host; read base URL from process.env.E2E_BASE_URL or fall back to 'http://localhost:3000'.
- - Keep under 120 lines.
- - No additional explanation, only code.`;
+- Use TypeScript with @playwright/test framework
+- Test the application at: ${baseUrl}
+- Create specific tests for the changed components
+- Use test.describe blocks for organization
+- Include responsive design testing if UI components changed
+- Use robust selectors (prefer data-testid, then role-based, then CSS)
+- Include meaningful assertions that verify functionality
+- Test both positive and negative scenarios where applicable
+- Keep total test under 150 lines but be comprehensive
+- Include setup/teardown as needed
+- Add accessibility checks if UI components changed
+- Return ONLY the TypeScript test code, no explanations
+
+Example selectors to prefer:
+- page.getByTestId('component-name')
+- page.getByRole('button', { name: 'Click me' })
+- page.locator('[data-testid="specific-element"]')
+- page.getByLabel('Form field')
+
+Focus on testing the actual functionality and user interactions for the changed components.`;
+}
+
+function analyzeComponentFilesBasic(changedFiles: string[]): string {
+  if (!changedFiles || changedFiles.length === 0) {
+    return 'No specific component files identified for analysis.';
+  }
+  
+  const analysis: string[] = [];
+  
+  changedFiles.forEach(file => {
+    const fileName = file.split('/').pop() || file;
+    const fileExt = fileName.split('.').pop()?.toLowerCase();
+    
+    if (fileExt === 'jsx' || fileExt === 'tsx') {
+      // React component analysis
+      if (fileName.toLowerCase().includes('header')) {
+        analysis.push(`• ${fileName}: Likely a header component - test navigation, branding, user menu, responsive behavior`);
+      } else if (fileName.toLowerCase().includes('button')) {
+        analysis.push(`• ${fileName}: Button component - test click events, disabled states, loading states`);
+      } else if (fileName.toLowerCase().includes('form')) {
+        analysis.push(`• ${fileName}: Form component - test input validation, submission, error handling`);
+      } else if (fileName.toLowerCase().includes('modal')) {
+        analysis.push(`• ${fileName}: Modal component - test open/close, backdrop clicks, escape key, focus management`);
+      } else if (fileName.toLowerCase().includes('table') || fileName.toLowerCase().includes('list')) {
+        analysis.push(`• ${fileName}: Data display component - test sorting, filtering, pagination, row selection`);
+      } else if (fileName.toLowerCase().includes('admin')) {
+        analysis.push(`• ${fileName}: Admin component - test admin-specific functionality, permissions, management features`);
+      } else {
+        analysis.push(`• ${fileName}: React component - test rendering, props handling, user interactions`);
+      }
+    } else if (fileExt === 'vue') {
+      analysis.push(`• ${fileName}: Vue component - test component lifecycle, data binding, events`);
+    } else if (fileExt === 'css' || fileExt === 'scss' || fileExt === 'less') {
+      analysis.push(`• ${fileName}: Styling changes - verify visual appearance, responsive design, animations`);
+    } else if (fileExt === 'js' || fileExt === 'ts') {
+      analysis.push(`• ${fileName}: Logic/utility file - test functionality through UI interactions that depend on this logic`);
+    } else {
+      analysis.push(`• ${fileName}: General file change - test related functionality`);
+    }
+  });
+  
+  return analysis.length > 0 ? analysis.join('\n') : 'Standard component testing recommended.';
 }
 
 function extractContent(resp: any): string | undefined {

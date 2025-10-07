@@ -9,6 +9,11 @@ tmp/
 # Generated artifacts
 generated_tests/
 test_execution_reports/
+test-results/
+tests/
+playwright-report/
+playwright-generated/
+project/
 
 # Environment & local config
 .env

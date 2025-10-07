@@ -28,6 +28,38 @@ export class ContextManagerAgent extends BaseAgent {
       case 'EXECUTION_FAILURE':
         await this.handleExecutionFailure(p);
         break;
+      case 'EXECUTION_RESULT':
+        // Extended: if failed and includes failedTests array, persist richer context then dispatch optimize request
+        if (p.status === 'failed' && Array.isArray(p.failedTests) && p.failedTests.length > 0) {
+          const ft = p.failedTests[0];
+          const selectorGuess: string | undefined = ft.selectorGuess;
+          const failureContext = {
+            executionId: p.executionId,
+            file: ft.file,
+            selectorGuess,
+            errorSnippet: ft.errorSnippet,
+            summary: p.summary,
+            ts: Date.now()
+          };
+          try {
+            await this.sharedMemory.set(this.key(`lastFailure:${p.executionId}`), failureContext, 3600);
+          } catch {}
+          // Derive a short testCaseId / file identity for optimizer
+          const optimizePayload = {
+            executionId: p.executionId,
+            testFilePath: ft.file,
+            originalSelector: selectorGuess,
+            attempt: 1
+          };
+          try {
+            await this.sendMessage({
+              target: { type: 'TestOptimizer' },
+              messageType: 'OPTIMIZE_TEST_FILE',
+              payload: optimizePayload
+            });
+          } catch {}
+        }
+        break;
       default:
         this['log']('debug', 'Ignoring message', { messageType: message.messageType });
     }

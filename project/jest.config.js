@@ -4,7 +4,7 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.test.ts', '**/*.spec.ts'],
-  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/coverage/'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/coverage/', 'manual-sample', '.pw.ts', '<rootDir>/playwright-generated/'],
   moduleNameMapper: {
     '^@communication/(.*)$': '<rootDir>/src/communication/$1',
     '^@database/(.*)$': '<rootDir>/src/database/$1',

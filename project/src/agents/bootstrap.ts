@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     agentType: 'TestWriter',
     mistral: {
       apiKey: process.env.MISTRAL_API_KEY || '',
-      model: process.env.MISTRAL_MODEL || 'mistral-small',
+  model: process.env.MISTRAL_MODEL || 'mistral-large-2411',
       maxTokens: parseInt(process.env.MISTRAL_MAX_TOKENS || '1024', 10),
       temperature: Number(process.env.MISTRAL_TEMP || 0.2),
       topP: Number(process.env.MISTRAL_TOP_P || 0.95),

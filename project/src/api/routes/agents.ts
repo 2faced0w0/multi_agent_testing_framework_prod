@@ -4,6 +4,7 @@ import { MessageQueue, type MessageQueueConfig } from '@communication/MessageQue
 import { loadConfig } from '@api/config';
 import { AgentMessage, AgentIdentifier } from '@app-types/communication';
 import { metrics } from '@monitoring/Metrics';
+import { requireAuth, requirePermissions } from '../middleware/authService';
 
 function mqConfig(): MessageQueueConfig { return loadConfig().messageQueue; }
 
@@ -26,7 +27,7 @@ async function enqueue(message: Omit<AgentMessage,'id'|'timestamp'|'source'>, pr
 const router = Router();
 
 // Test Writer: generate a test
-router.post('/test-writer/generate', async (req: Request, res: Response) => {
+router.post('/test-writer/generate', requireAuth, requirePermissions(['test:generate']), async (req: Request, res: Response) => {
   const { repo, branch, headCommit, changedFiles, compareUrl, priority } = req.body || {};
   const { messageId, mqError } = await enqueue({
     target: { type: 'TestWriter' } as AgentIdentifier,
@@ -39,7 +40,7 @@ router.post('/test-writer/generate', async (req: Request, res: Response) => {
 });
 
 // Test Writer: batch generate tests
-router.post('/test-writer/generate/batch', async (req: Request, res: Response) => {
+router.post('/test-writer/generate/batch', requireAuth, requirePermissions(['test:generate']), async (req: Request, res: Response) => {
   const { items, priority } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items[] required' });
   const maxBatch = Number(process.env.MAX_TEST_GENERATION_BATCH || 10);

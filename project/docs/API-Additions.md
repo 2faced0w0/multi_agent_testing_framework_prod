@@ -78,3 +78,11 @@ All metrics are exposed via the existing /metrics endpoint.
 - These changes are backward compatible with existing endpoints.
 - Consider adding dashboards based on the new metrics (Grafana JSON exists under project/docs/observability).
 - Batch generation allows rapid multi-scenario seeding while protecting system via queue depth guard.
+
+## Test Generation Enhancements (Oct 7, 2025)
+
+### Automatic Markdown Fence Stripping
+
+The TestWriterAgent now automatically removes leading/trailing markdown code fences (e.g. ```typescript / ```ts / ```) from AI model output before persisting files under `generated_tests/`. This prevents residual fences from appearing in raw artifacts and avoids a manual cleanup step. Implementation lives in `src/agents/test-writer/utils.ts` (`stripCodeFences`). The helper is idempotent and preserves a single trailing newline for stable diffs.
+
+No API changes were required; existing generation endpoints benefit transparently.

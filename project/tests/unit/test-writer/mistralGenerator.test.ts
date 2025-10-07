@@ -20,7 +20,7 @@ jest.mock('@mistralai/mistralai', () => {
 
 describe('mistralGenerator', () => {
   const baseCfg: any = {
-    mistral: { apiKey: 'test-key', model: 'mistral-large-latest', maxTokens: 500, temperature: 0.2, topP: 0.9 },
+  mistral: { apiKey: 'test-key', model: 'mistral-large-2411', maxTokens: 500, temperature: 0.2, topP: 0.9 },
     testGeneration: { maxRetries: 1, timeoutMs: 10000, enableOptimization: true, enableValidation: true, defaultBrowser: 'chromium', defaultViewport: { width: 1280, height: 720 } },
     templates: { defaultTemplate: 'playwright-pom', customTemplates: {} }
   };

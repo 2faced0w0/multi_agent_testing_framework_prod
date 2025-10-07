@@ -13,6 +13,8 @@
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
     "test:coverage": "jest --coverage",
+    "test:pw": "playwright test",
+    "test:pw:gen": "npm run postprocess:generated && playwright test playwright-generated",
     "validate:foundation": "ts-node scripts/validate-foundation.ts",
     "validate:all": "npm run validate:foundation && npm test",
     "lint": "eslint src/**/*.ts",
@@ -25,7 +27,9 @@
     "dev:agents": "ts-node -r tsconfig-paths/register src/agents/bootstrap.ts",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down",
-    "compose:up:playwright": "docker compose --profile playwright up -d agents-playwright"
+    "compose:up:playwright": "docker compose --profile playwright up -d agents-playwright",
+    "postprocess:generated": "ts-node scripts/postprocess-generated-tests.ts",
+    "generate:sample": "ts-node scripts/run-testwriter-sample.ts && npm run postprocess:generated"
   },
   "keywords": [
     "testing",
@@ -41,7 +45,8 @@
   "license": "MIT",
   "dependencies": {
     "@mistralai/mistralai": "^0.4.0",
-  "@playwright/test": "^1.55.1",
+    "@octokit/rest": "^22.0.0",
+    "@playwright/test": "^1.55.1",
     "ajv": "^8.12.0",
     "archiver": "^5.3.2",
     "cors": "^2.8.5",
@@ -56,7 +61,7 @@
     "module-alias": "^2.2.3",
     "morgan": "^1.10.0",
     "pino": "^8.16.1",
-  "playwright": "^1.55.1",
+    "playwright": "^1.55.1",
     "prom-client": "^15.1.0",
     "redis": "^4.6.10",
     "sqlite": "^5.1.1",

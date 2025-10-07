@@ -3,6 +3,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { testsGeneratedTotal, aiRequestsTotal } from '@monitoring/promMetrics';
 import { generatePlaywrightTest } from './mistralGenerator';
+import { stripCodeFences } from './utils';
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 import { GeneratedTestRepository } from '@database/repositories/GeneratedTestRepository';
@@ -62,14 +63,15 @@ export class TestWriterAgent extends BaseAgent {
     // Call AI generator (with fallback safety inside the module)
     const gen = await generatePlaywrightTest(payload, this.twConfig);
     const title = gen.title;
-    const content = gen.content;
+  // Normalize content by stripping accidental markdown code fences the model may emit
+  const content = stripCodeFences(gen.content);
 
     // Ensure target directory exists
   const outDir = path.resolve(process.cwd(), 'generated_tests');
     await fs.mkdir(outDir, { recursive: true });
     const filename = `${id}.spec.ts`;
     const filePath = path.join(outDir, filename);
-    await fs.writeFile(filePath, content, 'utf8');
+  await fs.writeFile(filePath, content, 'utf8');
 
     // Persist metadata (lazy DB init if needed)
     try {

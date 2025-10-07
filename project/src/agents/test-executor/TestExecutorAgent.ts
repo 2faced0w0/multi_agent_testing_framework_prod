@@ -8,14 +8,21 @@ import { ExecutionReportRepository } from '@database/repositories/ExecutionRepor
 import { TestExecutionRepository } from '@database/repositories/TestExecutionRepository';
 import { metrics } from '@monitoring/Metrics';
 import { executionStartsTotal, executionCompletionsTotal, testsExecutedTotal, executionDuration, queueWaitDuration } from '@monitoring/promMetrics';
+import { testExecutionPipeline, type TestExecutionConfig } from '../../services/TestExecutionPipelineService';
 
 export type TestExecutorAgentConfig = BaseAgentConfig & {
   execution: {
-    mode: 'simulate' | 'playwright-cli';
+    mode: 'simulate' | 'playwright-cli' | 'pipeline';
     timeoutMs: number;
     reportDir: string; // relative to project root
     testsDir: string;  // relative to project root
     defaultBrowser: 'chromium' | 'firefox' | 'webkit';
+    pipeline?: {
+      browsers?: string[];
+      headless?: boolean;
+      retries?: number;
+      workers?: number;
+    };
   };
 };
 
@@ -35,6 +42,31 @@ export class TestExecutorAgent extends BaseAgent {
 
   protected getConfigSchema(): object {
     return { type: 'object', properties: { execution: { type: 'object' } } };
+  }
+
+  /**
+   * Resolve test file path from payload or use a default generated test
+   */
+  private resolveTestFile(payload: any, folderName: string): string {
+    const projectRoot = process.cwd();
+    
+    // Check if a specific test file is requested
+    if (payload.testFilePath) {
+      return path.resolve(projectRoot, payload.testFilePath);
+    }
+    
+    // Check if test case ID points to a generated test
+    if (payload.testCaseId || payload.data?.testCaseId) {
+      const testId = payload.testCaseId || payload.data.testCaseId;
+      const testsDir = path.resolve(projectRoot, this.teConfig.execution.testsDir);
+      const testFile = path.join(testsDir, `${testId}.spec.ts`);
+      return testFile;
+    }
+    
+    // Default: look for the most recent test file in generated_tests
+    const testsDir = path.resolve(projectRoot, this.teConfig.execution.testsDir);
+    // For now, return a placeholder that will be resolved by the pipeline service
+    return path.join(testsDir, `${folderName}.spec.ts`);
   }
 
   protected async processMessage(message: AgentMessage): Promise<void> {
@@ -105,6 +137,80 @@ export class TestExecutorAgent extends BaseAgent {
   await fs.writeFile(singleHtmlPath, html, 'utf8');
       summary = 'Simulated execution: 1 test, 1 passed';
       if (apiExecId) { try { const ter = new TestExecutionRepository(this.database.getDatabase()); await ter.updateProgress(apiExecId, 1.0); } catch {} }
+    } else if (this.teConfig.execution.mode === 'pipeline') {
+      // Use the enhanced test execution pipeline
+      try {
+        const testFilePath = this.resolveTestFile(payload, folderName);
+        const pipelineConfig: TestExecutionConfig = {
+          testFilePath,
+          browsers: this.teConfig.execution.pipeline?.browsers || [this.teConfig.execution.defaultBrowser],
+          headless: this.teConfig.execution.pipeline?.headless ?? true,
+          timeout: this.teConfig.execution.timeoutMs,
+          retries: this.teConfig.execution.pipeline?.retries || 0,
+          workers: this.teConfig.execution.pipeline?.workers || 1,
+          outputDir: reportRoot,
+          baseUrl: process.env.E2E_BASE_URL || payload.baseUrl || 'https://example.org'
+        };
+
+        if (apiExecId) {
+          try { const ter = new TestExecutionRepository(this.database.getDatabase()); await ter.updateProgress(apiExecId, 0.3); } catch {}
+        }
+
+        const executionId = await testExecutionPipeline.executeTest(pipelineConfig);
+        
+        // Monitor execution progress
+        let result = testExecutionPipeline.getExecutionResult(executionId);
+        const startTime = Date.now();
+        while (result && result.status === 'running') {
+          if (this.cancellations.has(apiExecId || '')) {
+            await testExecutionPipeline.cancelExecution(executionId);
+            break;
+          }
+          
+          // Timeout check
+          if (Date.now() - startTime > this.teConfig.execution.timeoutMs) {
+            await testExecutionPipeline.cancelExecution(executionId);
+            break;
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          result = testExecutionPipeline.getExecutionResult(executionId);
+          
+          if (apiExecId && result) {
+            const progress = result.status === 'running' ? 0.6 : 0.9;
+            try { const ter = new TestExecutionRepository(this.database.getDatabase()); await ter.updateProgress(apiExecId, progress); } catch {}
+          }
+        }
+
+        if (result) {
+          switch (result.status) {
+            case 'passed':
+              status = 'passed';
+              summary = `Pipeline execution: ${result.summary.passed}/${result.summary.total} tests passed`;
+              break;
+            case 'failed':
+              status = 'failed';
+              summary = `Pipeline execution failed: ${result.summary.failed}/${result.summary.total} tests failed. ${result.error || ''}`;
+              break;
+            case 'cancelled':
+            case 'timeout':
+              status = 'skipped';
+              summary = 'Pipeline execution canceled or timed out';
+              break;
+            default:
+              status = 'failed';
+              summary = `Pipeline execution completed with status: ${result.status}`;
+          }
+        } else {
+          status = 'failed';
+          summary = 'Pipeline execution failed to complete';
+        }
+
+        if (apiExecId) { try { const ter = new TestExecutionRepository(this.database.getDatabase()); await ter.updateProgress(apiExecId, 1.0); } catch {} }
+      } catch (error) {
+        status = 'failed';
+        summary = `Pipeline execution error: ${(error as Error).message}`;
+      }
     } else {
       // Playwright CLI mode
   const testsDir = path.resolve(projectRoot, this.teConfig.execution.testsDir);
@@ -113,30 +219,39 @@ export class TestExecutorAgent extends BaseAgent {
       const args = ['playwright', 'test', testsDir, '--reporter=html'];
       if (grep) args.push(`--grep=${grep}`);
 
-      await new Promise<void>((resolve, reject) => {
+      const failedTests: any[] = [];
+      const stdoutLines: string[] = [];
+      const stderrLines: string[] = [];
+      const testFilePath = path.resolve(projectRoot, this.teConfig.execution.testsDir);
+      const runPromise = new Promise<void>((resolve, reject) => {
         const child = spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', args, {
           cwd: projectRoot,
-          stdio: 'inherit',
           env: {
             ...process.env,
-            // Do NOT override PLAYWRIGHT_BROWSERS_PATH. The official Playwright image ships browsers under /ms-playwright
-            // Direct Playwright HTML reporter to write into a per-execution folder
             PLAYWRIGHT_HTML_REPORT: reportFolder,
             E2E_BASE_URL: process.env.E2E_BASE_URL || 'https://example.org'
-          }
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
         });
         const to = setTimeout(() => {
           child.kill('SIGKILL');
           reject(new Error(`Playwright execution timed out after ${timeoutMs}ms`));
         }, timeoutMs);
-  // rough milestone at ~50% when child started
-  if (apiExecId) { try { const ter = new TestExecutionRepository(this.database.getDatabase()); ter.updateProgress(apiExecId, 0.5).catch(()=>{}); } catch {} }
+        if (apiExecId) { try { const ter = new TestExecutionRepository(this.database.getDatabase()); ter.updateProgress(apiExecId, 0.5).catch(()=>{}); } catch {} }
         const checkCancel = setInterval(() => {
           if (this.cancellations.has(apiExecId || '')) {
             try { child.kill('SIGKILL'); } catch {}
             clearInterval(checkCancel);
           }
         }, 500);
+        child.stdout?.on('data', d => {
+          const text = d.toString();
+          text.split(/\r?\n/).forEach((l: string) => { if (l.trim()) stdoutLines.push(l); });
+        });
+        child.stderr?.on('data', d => {
+          const text = d.toString();
+          text.split(/\r?\n/).forEach((l: string) => { if (l.trim()) stderrLines.push(l); });
+        });
         child.on('exit', (code) => {
           clearTimeout(to);
           clearInterval(checkCancel);
@@ -147,7 +262,9 @@ export class TestExecutorAgent extends BaseAgent {
           clearInterval(checkCancel);
           reject(err);
         });
-      }).then(() => {
+      });
+
+      await runPromise.then(() => {
         status = 'passed';
         summary = 'Playwright execution passed';
       }).catch((err) => {
@@ -157,9 +274,21 @@ export class TestExecutorAgent extends BaseAgent {
         } else {
           status = 'failed';
           summary = `Playwright execution failed: ${(err as Error).message}`;
+          // crude parse: capture first block containing getByTestId or locator failure
+          const combined = [...stdoutLines, ...stderrLines].slice(-200); // last 200 lines
+          const failureBlock = combined.join('\n');
+          const selectorMatch = failureBlock.match(/getByTestId\('([^']+)'\)/) || failureBlock.match(/getByRole\(([^)]+)\)/) || failureBlock.match(/locator\(['"]([^'"]+)['"]/);
+          failedTests.push({
+            file: payload.testFilePath || testFilePath,
+            errorSnippet: failureBlock.split('\n').slice(-30).join('\n'),
+            selectorGuess: selectorMatch ? selectorMatch[0] : undefined
+          });
+          (message as any).__failedTests = failedTests; // internal carry if needed
         }
       });
       if (apiExecId) { try { const ter = new TestExecutionRepository(this.database.getDatabase()); await ter.updateProgress(apiExecId, 1.0); } catch {} }
+      // attach failedTests to summary messaging later
+      (payload as any)._failedTests = (payload as any)._failedTests || (message as any).__failedTests;
     }
 
     // Determine final report path (for UI static serving)
@@ -186,7 +315,7 @@ export class TestExecutorAgent extends BaseAgent {
 
     // Publish event and follow-ups only if not shutting down
     if (!this.isStopping) {
-  await this.publishEvent('execution.completed', { id: apiExecId || internalRunId, status, reportPath: finalReportPath, summary });
+  await this.publishEvent('execution.completed', { id: apiExecId || internalRunId, status, reportPath: finalReportPath, summary, failedTests: (payload as any)._failedTests });
       // Notify ContextManager on failures to capture context for optimization
   if (String(status) === 'failed' && apiExecId) {
         try {
@@ -202,7 +331,7 @@ export class TestExecutorAgent extends BaseAgent {
         await this.sendMessage({
           target: { type: 'TestOptimizer' },
           messageType: 'EXECUTION_RESULT',
-          payload: { executionId: apiExecId || internalRunId, status, summary }
+          payload: { executionId: apiExecId || internalRunId, status, summary, failedTests: (payload as any)._failedTests }
         });
       } catch (e) {
         this.log('warn', 'Failed to notify optimizer', { error: (e as Error)?.message });
