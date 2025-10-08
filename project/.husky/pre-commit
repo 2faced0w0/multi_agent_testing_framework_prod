@@ -1,0 +1,10 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+echo "Running generated tests fence check..."
+npm run lint:generated || exit 1
+
+echo "Running unit subset (sanitizers)..."
+npx jest tests/unit/test-writer-agent-fence-strip.spec.ts --runInBand --silent || exit 1
+
+echo "Pre-commit checks passed."

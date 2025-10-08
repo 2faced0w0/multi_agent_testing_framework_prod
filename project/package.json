@@ -12,6 +12,7 @@
     "test": "jest",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
+  "test:ci": "jest --runInBand --detectOpenHandles --forceExit",
     "test:coverage": "jest --coverage",
     "test:pw": "playwright test",
     "test:pw:gen": "npm run postprocess:generated && playwright test playwright-generated",
@@ -29,6 +30,9 @@
     "compose:down": "docker compose down",
     "compose:up:playwright": "docker compose --profile playwright up -d agents-playwright",
     "postprocess:generated": "ts-node scripts/postprocess-generated-tests.ts",
+  "cleanup:generated": "ts-node scripts/cleanup-generated-tests.ts",
+  "lint:generated": "node scripts/check-generated-tests.js",
+  "prepare": "node scripts/prepare-husky.js",
     "generate:sample": "ts-node scripts/run-testwriter-sample.ts && npm run postprocess:generated"
   },
   "keywords": [

@@ -11,6 +11,19 @@
 import fs from 'fs';
 import path from 'path';
 
+// Reuse runtime utilities when compiled; fall back to lightweight impl if not resolvable
+let sanitize: (s: string) => string;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { sanitizeGeneratedTest } = require('../src/agents/test-writer/utils');
+  sanitize = sanitizeGeneratedTest;
+} catch {
+  const localStrip = (input: string) => input
+    .replace(/^```[a-zA-Z0-9_-]*\s+/, '')
+    .replace(/\n```\s*$/, '\n');
+  sanitize = (raw: string) => localStrip(raw).replace(/\n{3,}/g, '\n\n');
+}
+
 const SOURCE_DIR = path.resolve('generated_tests');
 const TARGET_DIR = path.resolve('playwright-generated');
 
@@ -53,13 +66,15 @@ function convertImports(content: string) {
 function processFile(filePath: string) {
   const raw = fs.readFileSync(filePath, 'utf-8');
   if (isAlreadyProcessed(raw)) return null; // skip
-
   let body = raw;
   body = stripCodeFences(body);
+  body = sanitize(body);
+  if (process.env.TEST_SANITIZE_LOG === 'true' && raw !== body) {
+    console.log(JSON.stringify({ level: 'DEBUG', stage: 'postprocess', file: filePath, changed: true }));
+  }
   body = normalizeSelectors(body);
   body = convertImports(body);
   body = injectHeader(body, path.basename(filePath));
-
   return body;
 }
 

@@ -9,15 +9,19 @@
 </head>
 <body>
   <div id="app">
-    <header class="row">
-      <a href="/" style="color:var(--accent);text-decoration:none">← Back</a>
-      <h1 style="margin:0">Report Viewer</h1>
-      <button id="download">Download</button>
+    <header class="page-head">
+      <a href="/" class="link-back">← Back</a>
+      <h1 class="page-title">Report Viewer</h1>
+      <div class="head-actions">
+        <button id="download" class="btn-secondary">Download</button>
+        <button id="theme-toggle" class="btn-secondary toggle-theme" title="Toggle theme">🌓</button>
+      </div>
     </header>
     <section class="card frame-wrap">
       <iframe id="frame" src="about:blank"></iframe>
     </section>
   </div>
-  <script src="/js/report.js"></script>
+  <script src="/js/report.js" defer></script>
+  <script src="/app.js" defer></script>
 </body>
 </html>

@@ -105,8 +105,34 @@ app.get('/metrics', async (_req, res) => {
   }
 });
 
-// Static dashboard (served from public/)
-app.use(express.static('public', { index: ['index.html'] }));
+// Static dashboard (served from public/) with light cache-busting support
+app.use((req, res, next) => {
+  // Force revalidation for core assets to avoid stale container cache
+  if (/\/app\.js$/.test(req.path) || /index\.html$/.test(req.path)) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  }
+  next();
+});
+// Strict CSP for dashboard assets (no inline scripts). We inject before static so it applies to index.html and app.js
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path === '/index.html' || req.path === '/app.js' || req.path === '/styles.css') {
+    // Adjust connect-src to include EventSource (same-origin) and optional websocket
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self'",
+      "img-src 'self' data:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "frame-ancestors 'self'",
+      "base-uri 'self'",
+      "form-action 'self'"
+    ].join('; ');
+    res.setHeader('Content-Security-Policy', csp);
+  }
+  next();
+});
+app.use(express.static('public', { index: ['index.html'], cacheControl: true, etag: true, maxAge: '5m' }));
 // Read-only static access to generated reports (for HTML viewing)
 // Relax CSP only for this route to allow Playwright report's inline scripts/styles
 app.use('/reports-static', (_req, res, next) => {

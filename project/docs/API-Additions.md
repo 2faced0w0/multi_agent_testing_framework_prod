@@ -86,3 +86,100 @@ All metrics are exposed via the existing /metrics endpoint.
 The TestWriterAgent now automatically removes leading/trailing markdown code fences (e.g. ```typescript / ```ts / ```) from AI model output before persisting files under `generated_tests/`. This prevents residual fences from appearing in raw artifacts and avoids a manual cleanup step. Implementation lives in `src/agents/test-writer/utils.ts` (`stripCodeFences`). The helper is idempotent and preserves a single trailing newline for stable diffs.
 
 No API changes were required; existing generation endpoints benefit transparently.
+
+### Multi-Layer Test Sanitization & Execution Hardening (Oct 7, 2025 - Phase 2)
+
+To eradicate residual markdown fences and HTML comment scaffolding that occasionally slipped through into containerized executions, a multi-layer sanitizer pipeline was introduced:
+
+1. Generation Layer (TestWriterAgent)
+  - Immediately runs `sanitizeGeneratedTest()` on AI output.
+  - Performs a late re-check before enqueueing execution if a stray leading fence appears.
+
+2. Post-Processing Layer (`scripts/postprocess-generated-tests.ts`)
+  - Re-sanitizes while normalizing imports, injecting a standard header, and renaming to `.pw.ts`.
+
+3. Bulk Cleanup (`scripts/cleanup-generated-tests.ts`)
+  - One-off / cron-eligible script to sanitize any legacy artifacts still containing fences.
+
+4. Execution Layer (TestExecutorAgent)
+  - Pipeline mode: sanitizes the resolved test file if fences detected.
+  - Playwright CLI mode: iterates all `*.spec.ts` files in the target directory and sanitizes as a last-resort pass before invoking Playwright.
+
+### Debug Logging Flag
+
+Set `TEST_SANITIZE_LOG=true` (env) to emit structured debug logs at every sanitation point showing whether content changed. This aids diagnosing stale container layers vs. runtime generation paths.
+
+### Static Asset Freshness & Cache Busting
+
+Problem: Updated `public/app.js` occasionally appeared stale inside rebuilt containers due to cached layers or external proxies.
+
+Mitigations:
+  - Added dynamic script injection in `public/index.html` that appends a `?v=<timestamp>` query param to `/app.js`.
+  - Added server-side `Cache-Control: no-cache, no-store, must-revalidate` headers for `app.js` and `index.html`.
+  - Introduced a diagnostic endpoint: `GET /api/v1/gui/debug/assets-hash` returning SHA256 (short) + mtime for key assets (app.js, index.html, styles.css) to verify deployed bytes.
+
+Example response:
+```
+{ "assets": { "app.js": { "hash": "9af3c1d0e4bb7a12", "mtime": "2025-10-07T18:42:10.123Z", "size": 31247 } } }
+```
+
+### Operational Guidance (Docker)
+
+When updating frontend or sanitizer logic:
+
+1. Force a clean build: `docker compose build --no-cache framework` (adjust service name as needed).
+2. Recreate containers: `docker compose up -d`.
+3. Verify asset hashes: `curl http://<host>:<port>/api/v1/gui/debug/assets-hash`.
+4. (Optional) Enable sanitizer debug: add `TEST_SANITIZE_LOG=true` to the framework & agent service environments to confirm live sanitation.
+
+### Security & Stability Notes
+
+- Sanitizer only strips known scaffolding (markdown fences, standalone HTML comments) and collapses excessive blank lines; it does NOT execute or transform code semantics.
+- All sanitation steps are idempotent; repeated application yields deterministic output (aiding reproducibility in CI/CD).
+
+### Future Enhancements (Proposed)
+
+- Add a Prometheus counter `sanitizer_changes_total{stage=...}` to quantify how often each layer modifies artifacts.
+- Introduce a build-time asset manifest whose hash is exposed for stronger integrity checks.
+- Provide a CLI `matf doctor` command to run sanitation + asset hash diagnostics locally.
+
+## Strict Content Security Policy (Oct 8, 2025)
+
+To eliminate CSP violations and prevent inline script/style execution on the main dashboard, a strict CSP header is now applied to `index.html`, `app.js`, and `styles.css` responses:
+
+```
+default-src 'self';
+script-src 'self';
+style-src 'self';
+img-src 'self' data:;
+font-src 'self' data:;
+connect-src 'self';
+frame-ancestors 'self';
+base-uri 'self';
+form-action 'self'
+```
+
+Changes implemented:
+1. Removed inline cache-busting script in `index.html`; replaced with `<script src="/app.js" defer>`.
+2. Converted critical inline style attributes to utility classes in `public/styles.css` (e.g., `.toolbar-row`, `.modal`, `.debug-log`).
+3. Added a secure modal and debug log styling without inline CSS.
+4. Reports at `/reports-static` retain a relaxed CSP permitting `'unsafe-inline'` to accommodate Playwright's generated HTML.
+
+### Relax / Extend Policy (Development Only)
+- You can conditionalize CSP in `server.ts` to append `'unsafe-inline'` for rapid prototyping (NOT recommended for production).
+- For individual inline script allowance, switch to nonce-based approach: generate a per-response nonce, inject `nonce="..."`, and add `script-src 'self' 'nonce-XYZ'`.
+
+### Asset Versioning Without Inline Scripts
+Current approach relies on `Cache-Control: no-cache` for core assets. To enable long-lived caching:
+- Hash filenames (build step produces `app.[hash].js`; reference directly in HTML).
+- Or server-render `index.html` template substituting `?v=${process.env.SERVER_START_TIME}` appended to `app.js` URL (still no inline JS needed—string replace on file contents before send).
+
+### Adding External Resources
+Explicitly list needed origins (e.g., `https://fonts.gstatic.com`). Avoid wildcards. Add them to the appropriate directive (`font-src`, `style-src`, etc.).
+
+### Debugging CSP Issues
+Look for `Refused to load the script` console errors. Confirm the blocked URL and extend policy deliberately—or refactor to self-host.
+
+### Security Rationale
+Removing inline execution sharply reduces XSS risk scope: attackers would need to control an external JavaScript file or compromise headers instead of injecting HTML alone.
+

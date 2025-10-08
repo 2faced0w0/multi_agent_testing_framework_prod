@@ -3,7 +3,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { testsGeneratedTotal, aiRequestsTotal } from '@monitoring/promMetrics';
 import { generatePlaywrightTest } from './mistralGenerator';
-import { stripCodeFences } from './utils';
+import { sanitizeGeneratedTest } from './utils';
 import BaseAgent, { type BaseAgentConfig } from '../base/BaseAgent';
 import type { AgentMessage } from '@app-types/communication';
 import { GeneratedTestRepository } from '@database/repositories/GeneratedTestRepository';
@@ -63,15 +63,19 @@ export class TestWriterAgent extends BaseAgent {
     // Call AI generator (with fallback safety inside the module)
     const gen = await generatePlaywrightTest(payload, this.twConfig);
     const title = gen.title;
-  // Normalize content by stripping accidental markdown code fences the model may emit
-  const content = stripCodeFences(gen.content);
+    // Sanitize content (fences, html scaffolding, excess blank lines)
+    let content = sanitizeGeneratedTest(gen.content);
+    const debugSan = process.env.TEST_SANITIZE_LOG === 'true';
+    if (debugSan) {
+      this.log('debug', 'TestWriterAgent sanitation applied', { lengthBefore: gen.content.length, lengthAfter: content.length, changed: gen.content !== content });
+    }
 
     // Ensure target directory exists
-  const outDir = path.resolve(process.cwd(), 'generated_tests');
+    const outDir = path.resolve(process.cwd(), 'generated_tests');
     await fs.mkdir(outDir, { recursive: true });
     const filename = `${id}.spec.ts`;
     const filePath = path.join(outDir, filename);
-  await fs.writeFile(filePath, content, 'utf8');
+    await fs.writeFile(filePath, content, 'utf8');
 
     // Persist metadata (lazy DB init if needed)
     try {
@@ -124,7 +128,15 @@ export class TestWriterAgent extends BaseAgent {
       this.log('warn', 'TypeScript validation unavailable; proceeding without compile check', { error: (e as Error)?.message });
     }
 
-    if (compileOk) {
+  if (compileOk) {
+      // Last-chance safeguard: if any residual leading code fence slipped through (model edge case), re-sanitize & overwrite.
+      if (/^```/.test(content)) {
+        try {
+          content = sanitizeGeneratedTest(content);
+          await fs.writeFile(filePath, content, 'utf8');
+          if (debugSan) this.log('debug', 'Late re-sanitize applied (leading fence detected)', { filePath });
+        } catch {}
+      }
       try {
         await this.sendMessage({
           target: { type: 'TestExecutor' },

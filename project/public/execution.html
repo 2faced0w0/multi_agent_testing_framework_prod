@@ -8,9 +8,10 @@
 </head>
 <body>
   <div id="app">
-    <header>
-      <a href="/" style="color:var(--accent);text-decoration:none">← Back</a>
-      <h1 style="margin:0">Execution Details</h1>
+    <header class="page-head">
+      <a href="/" class="link-back">← Back</a>
+      <h1 class="page-title">Execution Details</h1>
+      <button id="theme-toggle" class="btn-secondary toggle-theme" title="Toggle theme">🌓</button>
     </header>
     <section class="card">
       <div id="summary"></div>
@@ -26,67 +27,7 @@
       <ul id="arts"></ul>
     </section>
   </div>
-  <script>
-    function qs(name){ const u=new URL(location.href); return u.searchParams.get(name); }
-    const id = qs('id');
-    async function load(){
-      const res = await fetch(`/api/v1/gui/executions/${id}`);
-      if(!res.ok){ document.getElementById('summary').textContent = 'Not found'; return; }
-      const data = await res.json();
-      const e = data.execution;
-      document.getElementById('summary').textContent = `${e.id} – ${e.status} – ${e.browser || ''} ${e.device || ''}`;
-      const ulr = document.getElementById('reports');
-      function toStaticUrl(p){
-        const rp = String(p||'').replace(/\\/g,'/');
-        const rel = rp.replace(/^test_execution_reports\//,'');
-        // encode each path segment to preserve slashes
-        const encoded = rel.split('/').map(encodeURIComponent).join('/');
-        return `/reports-static/${encoded}`;
-      }
-      data.reports.forEach(r=>{
-        const a = document.createElement('a'); a.href = `/report.html?id=${encodeURIComponent(r.id)}`; a.textContent = r.id; a.target = '_blank';
-        const li = document.createElement('li');
-        li.append(a);
-        // Add inline HTML link when available
-        if (String(r.report_path||'').toLowerCase().endsWith('.html')){
-          const sep = document.createTextNode(' • ');
-          const inline = document.createElement('a'); inline.href = toStaticUrl(r.report_path); inline.textContent = 'Open HTML'; inline.target = '_blank';
-          li.append(sep, inline);
-        }
-        ulr.append(li);
-      });
-      // Open latest HTML report button with polling while execution is pending
-      const openBtn = document.getElementById('open-latest');
-      function openLatest(reports){
-        const html = (reports||[]).find((r)=> String(r.report_path||'').toLowerCase().endsWith('.html'));
-        if (!html) return false;
-        const rp = String(html.report_path||'').replace(/\\/g,'/');
-        if (rp.startsWith('test_execution_reports/')) { window.open(toStaticUrl(rp), '_blank'); return true; }
-        window.open(`/api/v1/gui/reports/${encodeURIComponent(html.id)}/download`, '_blank');
-        return true;
-      }
-      if (String(e.status).toLowerCase() === 'queued' || String(e.status).toLowerCase() === 'running') {
-        openBtn.disabled = true; openBtn.title = 'Report will be available after execution completes';
-        const poll = setInterval(async ()=>{
-          const r = await fetch(`/api/v1/gui/executions/${id}`).then(r=>r.ok?r.json():null);
-          if (!r) return;
-          const done = String(r.execution.status).toLowerCase();
-          if (done === 'passed' || done === 'failed' || done === 'canceled') {
-            clearInterval(poll);
-            openBtn.disabled = false; openBtn.title = '';
-            openBtn.onclick = ()=>{ if (!openLatest(r.reports)) alert('No HTML report found'); };
-          }
-        }, 3000);
-      } else {
-        openBtn.onclick = ()=>{ if (!openLatest(data.reports)) alert('No HTML report found'); };
-      }
-      const ula = document.getElementById('arts');
-      data.artifacts.forEach(a=>{
-        const li = document.createElement('li'); li.textContent = `${a.type} – ${a.path}`; ula.append(li);
-      });
-      document.getElementById('dl').onclick = ()=> { location.href = `/api/v1/gui/executions/${id}/artifacts.zip`; };
-    }
-    load();
-  </script>
+  <script src="/js/execution.js" defer></script>
+  <script src="/app.js" defer></script>
 </body>
 </html>

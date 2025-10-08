@@ -3,6 +3,7 @@ import 'tsconfig-paths/register';
 import 'dotenv/config';
 import { generatePlaywrightTest } from '../src/agents/test-writer/mistralGenerator';
 import { TestWriterAgentConfig } from '../src/agents/test-writer/TestWriterAgent';
+import { stripCodeFences } from '../src/agents/test-writer/utils';
 
 // IMPORTANT: Do NOT hardcode real secrets here. Ensure they are loaded via environment variables.
 // The user supplied API keys in chat; those MUST be rotated. This script only reads from process.env.
@@ -82,7 +83,9 @@ async function main() {
     const fs = await import('fs/promises');
     await fs.mkdir('generated_tests', { recursive: true });
     const outFile = 'generated_tests/manual-sample.spec.ts';
-    await fs.writeFile(outFile, result.content, 'utf8');
+  // Normalize by removing any accidental markdown code fences emitted by the model
+  const normalized = stripCodeFences(result.content);
+  await fs.writeFile(outFile, normalized, 'utf8');
     console.log(`\nSaved full test to ${outFile}`);
   } catch (e: any) {
     console.error('Generation failed:', e?.message || e);

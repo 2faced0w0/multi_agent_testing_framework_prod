@@ -9,6 +9,7 @@ import { TestExecutionRepository } from '@database/repositories/TestExecutionRep
 import { metrics } from '@monitoring/Metrics';
 import { executionStartsTotal, executionCompletionsTotal, testsExecutedTotal, executionDuration, queueWaitDuration } from '@monitoring/promMetrics';
 import { testExecutionPipeline, type TestExecutionConfig } from '../../services/TestExecutionPipelineService';
+import { sanitizeGeneratedTest, hasCodeFences } from '../test-writer/utils';
 
 export type TestExecutorAgentConfig = BaseAgentConfig & {
   execution: {
@@ -141,6 +142,22 @@ export class TestExecutorAgent extends BaseAgent {
       // Use the enhanced test execution pipeline
       try {
         const testFilePath = this.resolveTestFile(payload, folderName);
+        // Defensive: sanitize file contents if it already exists and contains fences
+        try {
+          const exists = await fs.stat(testFilePath).then(()=>true).catch(()=>false);
+          if (exists) {
+            const raw = await fs.readFile(testFilePath, 'utf8');
+            if (hasCodeFences(raw)) {
+              const cleaned = sanitizeGeneratedTest(raw);
+              if (cleaned !== raw) {
+                await fs.writeFile(testFilePath, cleaned, 'utf8');
+                this.log('info', 'Sanitized fenced test before pipeline execution', { testFilePath });
+              } else if (process.env.TEST_SANITIZE_LOG === 'true') {
+                this.log('debug', 'Fence detected but sanitizer made no changes (edge case)', { testFilePath });
+              }
+            }
+          }
+        } catch {}
         const pipelineConfig: TestExecutionConfig = {
           testFilePath,
           browsers: this.teConfig.execution.pipeline?.browsers || [this.teConfig.execution.defaultBrowser],
@@ -213,7 +230,27 @@ export class TestExecutorAgent extends BaseAgent {
       }
     } else {
       // Playwright CLI mode
-  const testsDir = path.resolve(projectRoot, this.teConfig.execution.testsDir);
+      const testsDir = path.resolve(projectRoot, this.teConfig.execution.testsDir);
+      // Sanitize every .spec.ts file in target tests directory as last-resort cleanup
+      try {
+        const entries = await fs.readdir(testsDir);
+        for (const f of entries) {
+          if (!f.endsWith('.spec.ts')) continue;
+          const full = path.join(testsDir, f);
+          try {
+            const txt = await fs.readFile(full, 'utf8');
+            if (hasCodeFences(txt)) {
+              const cleaned = sanitizeGeneratedTest(txt);
+              if (cleaned !== txt) {
+                await fs.writeFile(full, cleaned, 'utf8');
+                this.log('info', 'Sanitized fenced test before CLI execution', { file: full });
+              } else if (process.env.TEST_SANITIZE_LOG === 'true') {
+                this.log('debug', 'Fence detected but sanitizer made no changes (CLI mode)', { file: full });
+              }
+            }
+          } catch {}
+        }
+      } catch {}
       const grep = payload.grep || '';
       const timeoutMs = this.teConfig.execution.timeoutMs;
       const args = ['playwright', 'test', testsDir, '--reporter=html'];

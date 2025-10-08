@@ -9,6 +9,7 @@ import { ArtifactsRepository } from '@database/repositories/ArtifactsRepository'
 import archiver from 'archiver';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { loadConfig } from '@api/config';
 import { MessageQueue } from '@communication/MessageQueue';
 import type { AgentMessage } from '@app-types/communication';
@@ -322,5 +323,26 @@ router.patch('/watchers/:id', maybeAuth, maybeRequireRole(['admin','ops']), asyn
   } catch (err: any) {
     metrics.inc('api_gui_watchers_patch_errors_total');
     return res.status(500).json({ error: 'Failed to update watcher', details: err?.message });
+  }
+});
+
+// Debug: return hashes of key static assets to verify container freshness
+router.get('/debug/assets-hash', maybeAuth, maybeRequireRole(['admin','ops','viewer']), async (_req: Request, res: Response) => {
+  try {
+    const pub = path.resolve(process.cwd(), 'public');
+    const files = ['app.js', 'index.html', 'styles.css'];
+    const out: any = {};
+    for (const f of files) {
+      const p = path.join(pub, f);
+      if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+        const buf = fs.readFileSync(p);
+        const hash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 16);
+        const mtime = fs.statSync(p).mtime.toISOString();
+        out[f] = { hash, mtime, size: buf.length };
+      }
+    }
+    return res.json({ assets: out });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'failed' });
   }
 });

@@ -12,6 +12,14 @@
       <h1>Multi‑Agent Testing Framework</h1>
       <span class="badge">Dark · Minimal</span>
     </header>
+    <div id="dashboard-error" class="alert error hidden"></div>
+    <div class="toolbar-row">
+      <div id="last-refresh" class="hint">Last refresh: (pending)</div>
+      <div id="global-loading" class="global-loading hidden">
+        <div class="spinner sm"></div>
+        <span>Loading…</span>
+      </div>
+    </div>
 
     <section class="card">
       <h2>Watch a GitHub Repository</h2>
@@ -26,12 +34,12 @@
     <section class="grid">
       <div class="card">
         <h3>Totals</h3>
-        <ul id="totals"></ul>
+  <ul id="totals" class="loading-block"><li><div class="spinner sm"></div></li></ul>
       </div>
       <div class="card">
         <h3>Watchers</h3>
-        <form id="watchers-filter" style="margin-bottom:8px; display:flex; gap:8px; align-items:center;">
-          <input id="q" type="text" placeholder="search repo (q)" style="flex:1" />
+  <form id="watchers-filter" class="filter-form">
+          <input id="q" type="text" placeholder="search repo (q)" class="flex-1" />
           <select id="status">
             <option value="">status: all</option>
             <option value="active">active</option>
@@ -41,30 +49,30 @@
           <button type="submit">Apply</button>
           <button type="button" id="reset">Reset</button>
         </form>
-        <ul id="watchers"></ul>
+  <ul id="watchers" class="loading-block"><li><div class="spinner sm"></div></li></ul>
       </div>
       <div class="card">
         <h3>Recent Executions</h3>
-        <ul id="executions"></ul>
+  <ul id="executions" class="loading-block"><li><div class="spinner sm"></div></li></ul>
       </div>
       <div class="card">
         <h3>Recent Reports</h3>
-        <ul id="reports"></ul>
+  <ul id="reports" class="loading-block"><li><div class="spinner sm"></div></li></ul>
       </div>
       <div class="card">
         <h3>Recent Test Cases</h3>
-        <ul id="tests"></ul>
+  <ul id="tests" class="loading-block"><li><div class="spinner sm"></div></li></ul>
       </div>
       <div class="card">
         <h3>Live Status</h3>
         <div id="runtime">
-          <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <div class="row-spaced mb-8">
             <button id="reset-queues" title="Clear default/high/critical queues and DLQ">Reset Queues</button>
             <span id="reset-queues-status" class="hint"></span>
           </div>
           <div id="queue-stats"></div>
           <div id="exec-counts"></div>
-          <div class="grid" style="grid-template-columns:1fr 1fr; gap:8px;">
+          <div class="grid two-col gap-8">
             <div>
               <h4>Running</h4>
               <ul id="running-list"></ul>
@@ -74,6 +82,12 @@
               <ul id="queued-list"></ul>
             </div>
           </div>
+        </div>
+      </div>
+      <div class="card card-debug">
+        <h3 class="debug-header">Debug Log <button id="debug-clear" class="btn-tiny">Clear</button></h3>
+        <div id="debug-log" class="debug-log">
+          <div class="hint">Network / dashboard diagnostics will appear here.</div>
         </div>
       </div>
     </section>
@@ -86,6 +100,20 @@
       <a href="/api/v1/system/health" target="_blank">API health</a>
     </footer>
   </div>
-  <script src="/app.js"></script>
+  <!-- External script (no inline JS to satisfy strict CSP). If cache busting needed, server can append ?v=envStamp. -->
+  <script src="/app.js" defer></script>
+    <!-- Token Modal for JWT acquisition -->
+    <div id="token-modal" class="modal hidden">
+      <div class="modal-body">
+        <h3>Authentication Required</h3>
+        <p class="modal-text">Repeated 401 responses detected. Provide a JWT (payload with <code>roles:['admin']</code>) or disable GUI auth for development (<code>GUI_AUTH_ENABLED=false</code>).</p>
+        <textarea id="token-input" class="token-input" placeholder="Paste Bearer token here"></textarea>
+        <div class="modal-actions">
+          <button id="token-cancel" class="btn-secondary">Cancel</button>
+          <button id="token-save" class="btn-primary">Save Token</button>
+        </div>
+        <div id="token-status" class="hint token-status"></div>
+      </div>
+    </div>
 </body>
 </html>

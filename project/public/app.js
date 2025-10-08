@@ -1,8 +1,72 @@
 async function fetchJson(url, opts) {
-  const res = await fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return await res.json();
+  const start = performance.now();
+  const headers = { 'Content-Type': 'application/json' };
+  const method = (opts && opts.method) || 'GET';
+  try {
+    const token = (window.MATF_TOKEN) || (typeof localStorage !== 'undefined' && localStorage.getItem('matf_token'));
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+  } catch { /* ignore storage errors */ }
+  let res;
+  try {
+    res = await fetch(url, Object.assign({ headers }, opts || {}));
+  } catch (networkErr) {
+    const dur = (performance.now() - start).toFixed(1);
+    console.debug('[dash][fetch] network error', { url, method, dur, error: networkErr && networkErr.message });
+    appendDebugEntry({ t: Date.now(), phase: 'net-error', url, method, dur, error: networkErr && networkErr.message });
+    throw networkErr;
+  }
+  const ct = res.headers.get('content-type') || '';
+  let bodyText = '';
+  let json;
+  if (ct.includes('application/json')) {
+    try { json = await res.json(); } catch { /* fall through */ }
+  } else {
+    try { bodyText = await res.text(); } catch {}
+  }
+  const dur = (performance.now() - start).toFixed(1);
+  const snippet = () => {
+    const raw = json ? JSON.stringify(json) : bodyText || '';
+    return raw.length > 200 ? raw.slice(0, 200)+'…' : raw;
+  };
+  if (!res.ok) {
+    console.debug('[dash][fetch] fail', { url, method, status: res.status, dur, snippet: snippet() });
+    appendDebugEntry({ t: Date.now(), phase: 'fail', url, method, status: res.status, dur, snippet: snippet() });
+    const msg = (json && (json.error || json.message)) || ('HTTP ' + res.status);
+    const err = new Error(msg);
+    err.status = res.status;
+    err.body = json || bodyText;
+    throw err;
+  }
+  console.debug('[dash][fetch] ok', { url, method, status: res.status, dur, bytes: (json? JSON.stringify(json).length : (bodyText||'').length) });
+  appendDebugEntry({ t: Date.now(), phase: 'ok', url, method, status: res.status, dur });
+  return json !== undefined ? json : bodyText;
 }
+
+// Debug log handling
+const __debugEntries = [];
+function appendDebugEntry(e) {
+  try {
+    __debugEntries.push(e);
+    while (__debugEntries.length > 200) __debugEntries.shift();
+    const panel = document.getElementById('debug-log');
+    if (!panel) return; // panel not on execution.html etc
+    const line = document.createElement('div');
+    const ts = new Date(e.t || Date.now()).toLocaleTimeString();
+    const parts = [ts, e.phase, e.method, e.status || '', e.dur + 'ms', e.url, e.error || '', e.snippet || ''];
+    line.textContent = parts.filter(Boolean).join(' | ');
+    if (e.phase === 'fail' || e.phase === 'net-error') line.classList.add('log-error');
+    panel.append(line);
+    panel.scrollTop = panel.scrollHeight;
+  } catch { /* ignore */ }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const clr = document.getElementById('debug-clear');
+  if (clr) clr.addEventListener('click', ()=>{
+    const panel = document.getElementById('debug-log');
+    if (panel) panel.innerHTML = '<div class="hint">Cleared.</div>';
+    __debugEntries.length = 0;
+  });
+});
 
 function el(tag, attrs, ...children) {
   const e = document.createElement(tag);
@@ -13,7 +77,25 @@ function el(tag, attrs, ...children) {
 
 async function loadDashboard(params) {
   const errBanner = document.getElementById('dashboard-error');
-  if (errBanner) errBanner.textContent = '';
+  if (errBanner) { errBanner.classList.add('hidden'); errBanner.textContent = ''; }
+  showGlobalLoading(true);
+  const attemptId = Date.now() + '-' + Math.random().toString(36).slice(2,7);
+  appendDebugEntry({ t: Date.now(), phase: 'load-start', attemptId });
+  let failsafeTriggered = false;
+  const failsafeTimer = setTimeout(()=>{
+    try {
+      const totals = document.getElementById('totals');
+      if (totals && totals.children.length === 1 && totals.querySelector('.spinner')) {
+        // still in placeholder state
+        failsafeTriggered = true;
+        appendDebugEntry({ t: Date.now(), phase: 'failsafe', attemptId, note: 'Totals still spinner after timeout' });
+        if (errBanner) {
+          errBanner.textContent = 'Dashboard appears stalled (no data populated after timeout). Check network tab, API availability, or authentication.';
+          errBanner.classList.remove('hidden');
+        }
+      }
+    } catch {}
+  }, 4000);
   try {
     const data = await fetchJson('/api/v1/gui/dashboard');
     const totals = document.getElementById('totals');
@@ -38,14 +120,14 @@ async function loadDashboard(params) {
         uiChip || '',
         ` — updated ${ts}`
       );
-      const runBtn = el('button', { style: 'margin-left:8px' }, 'Run Now');
+  const runBtn = el('button', { class: 'ml-8' }, 'Run Now');
       runBtn.addEventListener('click', async () => {
         runBtn.disabled = true;
         try { await fetchJson(`/api/v1/gui/watchers/${w.id}/run`, { method: 'POST' }); alert('Queued'); }
         catch (e) { alert('Failed to queue: ' + e.message); }
         finally { runBtn.disabled = false; }
       });
-      const toggleBtn = el('button', { style: 'margin-left:8px' }, (w.status === 'inactive' ? 'Enable' : 'Disable'));
+  const toggleBtn = el('button', { class: 'ml-8' }, (w.status === 'inactive' ? 'Enable' : 'Disable'));
       toggleBtn.addEventListener('click', async () => {
         toggleBtn.disabled = true;
         try {
@@ -126,10 +208,28 @@ async function loadDashboard(params) {
     } catch (e) {
       // ignore live status errors; keep dashboard usable
     }
+      updateLastRefresh(Date.now());
+      consecutiveAuthFailures = 0;
+      scheduleNext(true);
+      appendDebugEntry({ t: Date.now(), phase: 'load-complete', attemptId, failsafeTriggered: !!failsafeTriggered });
   } catch (e) {
     console.error('Dashboard error', e);
-    if (errBanner) errBanner.textContent = 'Dashboard load failed: ' + (e?.message || 'error');
+    if (errBanner) {
+      errBanner.textContent = 'Dashboard load failed: ' + (e?.message || 'error') + (e.status ? ` (status ${e.status})` : '');
+      errBanner.classList.remove('hidden');
+      if (e.status === 401) {
+        errBanner.textContent += ' — Authentication required (set GUI_AUTH_ENABLED=false for dev or supply token).';
+          consecutiveAuthFailures++;
+          if (consecutiveAuthFailures >= 2) {
+            openTokenModal();
+          }
+      }
+    }
+      scheduleNext(false);
+      appendDebugEntry({ t: Date.now(), phase: 'load-error', attemptId, error: e && e.message, status: e && e.status });
   }
+    clearTimeout(failsafeTimer);
+    showGlobalLoading(false);
 }
 
 async function refreshWatchersOnly(params){
@@ -151,14 +251,14 @@ async function refreshWatchersOnly(params){
         uiChip || '',
         ` — updated ${ts}`
       );
-      const runBtn = el('button', { style: 'margin-left:8px' }, 'Run Now');
+  const runBtn = el('button', { class: 'ml-8' }, 'Run Now');
       runBtn.addEventListener('click', async () => {
         runBtn.disabled = true; runBtn.textContent = 'Queuing...';
         try { await fetchJson(`/api/v1/gui/watchers/${w.id}/run`, { method: 'POST' }); runBtn.textContent = 'Queued'; setTimeout(()=>{ runBtn.textContent='Run Now'; },1500); }
         catch (e) { alert('Failed to queue: ' + e.message); }
         finally { runBtn.disabled = false; await refreshWatchersOnly(params); }
       });
-      const toggleBtn = el('button', { style: 'margin-left:8px' }, (w.status === 'inactive' ? 'Enable' : 'Disable'));
+  const toggleBtn = el('button', { class: 'ml-8' }, (w.status === 'inactive' ? 'Enable' : 'Disable'));
       toggleBtn.addEventListener('click', async () => {
         toggleBtn.disabled = true;
         try {
@@ -201,8 +301,55 @@ document.getElementById('reset').addEventListener('click', ()=>{
   loadDashboard();
 });
 
-// Initialize dashboard
-loadDashboard();
+// Initialize dashboard (defer slightly to allow token injection if needed)
+// Adaptive refresh scheduling (replaces fixed interval)
+let consecutiveFailures = 0;
+let consecutiveAuthFailures = 0;
+let refreshIntervalMs = 10000;
+const MIN_INTERVAL = 5000;
+const MAX_INTERVAL = 120000;
+let refreshTimer = null;
+
+function scheduleNext(success) {
+  if (success) {
+    consecutiveFailures = 0;
+    refreshIntervalMs = 10000;
+  } else {
+    consecutiveFailures++;
+    const factor = Math.min(6, consecutiveFailures); // cap exponent
+    refreshIntervalMs = Math.min(MAX_INTERVAL, MIN_INTERVAL * Math.pow(2, factor));
+  }
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(()=> loadDashboard({ status: statusSel.value || '', q: qInput.value || '' }), refreshIntervalMs);
+}
+
+function showGlobalLoading(show) {
+  const gl = document.getElementById('global-loading');
+  if (!gl) return;
+  if (show) gl.classList.remove('hidden'); else gl.classList.add('hidden');
+}
+function updateLastRefresh(ts) {
+  const elr = document.getElementById('last-refresh');
+  if (elr) elr.textContent = 'Last refresh: ' + new Date(ts).toLocaleTimeString();
+}
+function openTokenModal(){ const m = document.getElementById('token-modal'); if (m) m.classList.remove('hidden'); }
+function closeTokenModal(){ const m = document.getElementById('token-modal'); if (m) m.classList.add('hidden'); }
+function wireTokenModal(){
+  const save = document.getElementById('token-save');
+  const cancel = document.getElementById('token-cancel');
+  const status = document.getElementById('token-status');
+  if (cancel) cancel.addEventListener('click', ()=> closeTokenModal());
+  if (save) save.addEventListener('click', ()=>{
+    const ta = document.getElementById('token-input');
+    const val = (ta && ta.value || '').trim();
+    if (!val) { if (status) status.textContent='Token required.'; return; }
+    try { localStorage.setItem('matf_token', val); if (status) status.textContent='Saved. Retrying…'; }
+    catch(e){ if (status) status.textContent='Store failed: '+e.message; return; }
+    setTimeout(()=>{ closeTokenModal(); loadDashboard({ status: statusSel.value || '', q: qInput.value || '' }); }, 400);
+  });
+}
+wireTokenModal();
+setTimeout(()=>{ loadDashboard(); }, 60);
 
 // Wire SSE for runtime live updates (with fetch fallback)
 try {
@@ -248,13 +395,13 @@ try {
       }
     } catch (e) { /* ignore bad frame */ }
   });
-  es.addEventListener('error', () => { /* keep connection; fallback still active */ });
+  es.addEventListener('error', (evt) => { console.warn('SSE runtime stream error', evt); /* fallback continues */ });
 } catch (e) {
   // ignore if EventSource unsupported
 }
 
 // Keep periodic fetch as a fallback for totals/watchers/reports and runtime in case SSE drops
-setInterval(()=> loadDashboard({ status: statusSel.value || '', q: qInput.value || '' }), 10000);
+// Fixed interval removed in favor of adaptive scheduling.
 
 // Reset queues button wiring
 (function(){
@@ -274,6 +421,31 @@ setInterval(()=> loadDashboard({ status: statusSel.value || '', q: qInput.value 
       status.textContent = 'Error: ' + (e?.message || 'failed');
     } finally {
       setTimeout(()=>{ status.textContent=''; btn.disabled = false; }, 2000);
+    }
+  });
+})();
+
+// Theme toggle logic (shared across pages using app.js)
+(function(){
+  const STORAGE_KEY = 'matf_theme';
+  function applyTheme(t){
+    const b = document.body;
+    b.classList.remove('theme-light','theme-dark');
+    if (t === 'light') b.classList.add('theme-light'); else b.classList.add('theme-dark');
+    const btns = document.querySelectorAll('.toggle-theme');
+    btns.forEach(bn => { bn.textContent = (t === 'light' ? '🌙' : '🌓'); });
+  }
+  function current(){
+    try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
+  }
+  function persist(t){ try { localStorage.setItem(STORAGE_KEY, t); } catch {} }
+  const init = current() || 'dark';
+  document.addEventListener('DOMContentLoaded', ()=> applyTheme(init));
+  document.addEventListener('click', (e)=>{
+    const tgt = e.target;
+    if (tgt && tgt.classList && tgt.classList.contains('toggle-theme')){
+      const next = (current() === 'light') ? 'dark' : 'light';
+      persist(next); applyTheme(next);
     }
   });
 })();
