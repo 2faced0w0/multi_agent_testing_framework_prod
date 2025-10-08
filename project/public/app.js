@@ -121,13 +121,13 @@ async function loadDashboard(params) {
       const statusChip = el('span', { class: 'chip ' + (w.status==='active'?'ok':w.status==='pending'?'warn':'err') }, w.status);
       const uiChanged = (()=>{ try { return JSON.parse(w.last_event||'{}').uiChanged; } catch { return false; } })();
       const uiChip = uiChanged ? el('span', { class: 'chip ok' }, 'UI change detected') : null;
-      const li = el('li', null,
-        `${w.full_name} [${w.default_branch}] `,
-        statusChip,
-        uiChip ? ' ' : '',
-        uiChip || '',
-        ` — updated ${ts}`
-      );
+      const li = document.createElement('li');
+      li.className = 'data-row';
+      li.innerHTML = `
+        <span class="data-cell-id" title="${w.full_name}">${w.full_name}</span>
+        <span>${w.default_branch||''}</span>
+        <span class="data-cell-meta">${statusChip.outerHTML}${uiChip? (' '+uiChip.outerHTML):''}</span>
+        <span class="data-actions" title="Updated ${ts}"></span>`;
   const runBtn = el('button', { class: 'ml-8' }, 'Run Now');
       runBtn.addEventListener('click', async () => {
         runBtn.disabled = true;
@@ -157,21 +157,25 @@ async function loadDashboard(params) {
       executions.append(el('li', null, a, chip, el('span',{ class:'muted'}, x.browser||''), el('span',{class:'muted'}, ts)));
     });
 
-    const reports = document.getElementById('reports');
-    reports.innerHTML = '';
-    (data.reports || []).forEach((r) => {
-      const a = el('a', { href: `/report.html?id=${encodeURIComponent(r.id)}`, target: '_blank', title: r.id }, r.id.slice(0,10));
-      const chip = el('span', { class: 'chip ' + (r.status==='passed'?'ok':r.status==='failed'?'err':'warn') }, r.status||'report');
-      const ts = r.created_at ? new Date(r.created_at).toLocaleString() : '';
-      reports.append(el('li', null, a, chip, el('span',{class:'muted'}, ts)));
-    });
+    const reportsList = document.getElementById('reportsList');
+    if (reportsList) {
+      reportsList.innerHTML = '';
+      (data.reports || []).forEach((r) => {
+        const a = el('a', { href: `/report.html?id=${encodeURIComponent(r.id)}`, target: '_blank', title: r.id }, r.id.slice(0,10));
+        const chip = el('span', { class: 'chip ' + (r.status==='passed'?'ok':r.status==='failed'?'err':'warn') }, r.status||'report');
+        const ts = r.created_at ? new Date(r.created_at).toLocaleString() : '';
+        reportsList.append(el('li', null, a, chip, el('span',{class:'muted'}, ts)));
+      });
+    }
 
-    const tests = document.getElementById('tests');
-    tests.innerHTML = '';
-    (data.tests || []).forEach((t) => {
-      const ti = t.title && t.title.length>60 ? t.title.slice(0,57)+'…' : t.title;
-      tests.append(el('li', null, ti));
-    });
+    const testsList = document.getElementById('testsList');
+    if (testsList) {
+      testsList.innerHTML = '';
+      (data.tests || []).forEach((t) => {
+        const ti = t.title && t.title.length>60 ? t.title.slice(0,57)+'…' : t.title;
+        testsList.append(el('li', null, ti));
+      });
+    }
 
     // Runtime/live status
     try {
@@ -253,13 +257,13 @@ async function refreshWatchersOnly(params){
       const statusChip = el('span', { class: 'chip ' + (w.status==='active'?'ok':w.status==='pending'?'warn':'err') }, w.status);
       const uiChanged = (()=>{ try { return JSON.parse(w.last_event||'{}').uiChanged; } catch { return false; } })();
       const uiChip = uiChanged ? el('span', { class: 'chip ok' }, 'UI change detected') : null;
-      const li = el('li', null,
-        `${w.full_name} [${w.default_branch}] `,
-        statusChip,
-        uiChip ? ' ' : '',
-        uiChip || '',
-        ` — updated ${ts}`
-      );
+        const li = document.createElement('li');
+        li.className = 'data-row';
+        li.innerHTML = `
+          <span class="data-cell-id" title="${w.full_name}">${w.full_name}</span>
+          <span>${w.default_branch||''}</span>
+          <span class="data-cell-meta">${statusChip.outerHTML}${uiChip? (' '+uiChip.outerHTML):''}</span>
+          <span class="data-actions" title="Updated ${ts}"></span>`;
   const runBtn = el('button', { class: 'ml-8' }, 'Run Now');
       runBtn.addEventListener('click', async () => {
         runBtn.disabled = true; runBtn.textContent = 'Queuing...';
@@ -456,5 +460,39 @@ try {
       const next = (current() === 'light') ? 'dark' : 'light';
       persist(next); applyTheme(next);
     }
+  });
+})();
+
+// Density toggle & debug collapse
+(function(){
+  function applyDensity(d){
+    document.body.classList.remove('density-compact','density-comfortable');
+    document.body.classList.add(d === 'compact' ? 'density-compact' : 'density-comfortable');
+  }
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const densityBtn = document.getElementById('densityToggle');
+    const debugToggle = document.getElementById('debugToggle');
+    const saved = (function(){ try { return localStorage.getItem('matf_density'); } catch { return null; } })() || 'comfortable';
+    applyDensity(saved);
+    if (densityBtn) densityBtn.textContent = saved === 'compact' ? 'Comfortable' : 'Compact';
+    // Collapse debug by default (unless user previously expanded in this session - not persisted yet)
+    if (debugToggle) {
+      document.body.classList.add('debug-collapsed');
+      debugToggle.setAttribute('aria-expanded','false');
+      debugToggle.textContent = 'Show';
+    }
+    densityBtn && densityBtn.addEventListener('click', ()=>{
+      const cur = (function(){ try { return localStorage.getItem('matf_density'); } catch { return null; } })() || 'comfortable';
+      const next = cur === 'comfortable' ? 'compact' : 'comfortable';
+      try { localStorage.setItem('matf_density', next); } catch {}
+      applyDensity(next);
+      densityBtn.textContent = next === 'compact' ? 'Comfortable' : 'Compact';
+    });
+    debugToggle && debugToggle.addEventListener('click', ()=>{
+      const expanded = debugToggle.getAttribute('aria-expanded') === 'true';
+      debugToggle.setAttribute('aria-expanded', String(!expanded));
+      debugToggle.textContent = expanded ? 'Show' : 'Hide';
+      document.body.classList.toggle('debug-collapsed', expanded);
+    });
   });
 })();

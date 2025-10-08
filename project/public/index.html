@@ -24,7 +24,15 @@
     <section class="card">
       <h2>Watch a GitHub Repository</h2>
       <form id="watch-form">
-        <input id="repoUrl" type="url" placeholder="https://github.com/owner/repo" required />
+        <section class="grid dashboard-lists">
+          <header class="app-header">
+            <h1>Multi-Agent Testing Framework Dashboard</h1>
+            <div class="header-actions">
+              <button id="themeToggle" class="btn sm" type="button" aria-label="Toggle theme">Toggle Theme</button>
+              <button id="densityToggle" class="btn sm density-toggle" type="button" aria-label="Toggle density">Compact</button>
+              <button id="openTokenModal" class="btn sm" type="button">Set API Token</button>
+            </div>
+          </header>
         <input id="branch" type="text" placeholder="branch (default: main)" />
         <button type="submit">Add & Queue Analysis</button>
       </form>
@@ -60,11 +68,15 @@
       </div>
       <div class="card">
         <h3>Reports</h3>
-        <ul id="reports" class="data-list loading-block"><li><div class="spinner sm"></div></li></ul>
+        <div class="scroll-section" id="reportsScroll">
+          <ul id="reportsList" class="data-list mini-list"></ul>
+        </div>
       </div>
       <div class="card">
         <h3>Test Cases</h3>
-        <ul id="tests" class="data-list loading-block"><li><div class="spinner sm"></div></li></ul>
+        <div class="scroll-section" id="testsScroll">
+          <ul id="testsList" class="data-list mini-list"></ul>
+        </div>
       </div>
       <div class="card live-col">
         <h3>Live Status</h3>
@@ -88,7 +100,11 @@
         </div>
       </div>
       <div class="card card-debug debug-col">
-        <h3 class="debug-header">Debug Log <button id="debug-clear" class="btn-tiny">Clear</button></h3>
+        <h3 class="debug-header">Debug Log</h3>
+        <div class="section-head" style="display:flex; align-items:center; gap:12px;">
+          <h2 style="flex:1; margin:0; font-size:14px;">Debug Log</h2>
+          <button id="debugToggle" type="button" class="btn sm debug-toggle" aria-expanded="false">Show</button>
+        </div>
         <div id="debug-log" class="debug-log">
           <div class="hint">Network / dashboard diagnostics will appear here.</div>
         </div>
