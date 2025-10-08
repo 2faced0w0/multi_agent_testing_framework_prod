@@ -98,11 +98,19 @@ async function loadDashboard(params) {
   }, 4000);
   try {
     const data = await fetchJson('/api/v1/gui/dashboard');
-    const totals = document.getElementById('totals');
-    totals.innerHTML = '';
-    Object.entries(data.totals).forEach(([k, v]) => {
-      totals.append(el('li', null, `${k}: ${v}`));
-    });
+    const totalsContainer = document.getElementById('totals');
+    if (totalsContainer) {
+      totalsContainer.classList.remove('loading-block');
+      totalsContainer.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      Object.entries(data.totals).forEach(([k,v])=>{
+        const d = document.createElement('div');
+        d.className = 'stat';
+        d.textContent = `${k}: ${v}`;
+        frag.append(d);
+      });
+      totalsContainer.append(frag);
+    }
 
   const watchers = document.getElementById('watchers');
     watchers.innerHTML = '';
@@ -143,25 +151,26 @@ async function loadDashboard(params) {
     const executions = document.getElementById('executions');
     executions.innerHTML = '';
     data.executions.forEach((x) => {
-      const a = el('a', { href: `/execution.html?id=${encodeURIComponent(x.id)}`, target: '_blank' }, x.id);
+      const a = el('a', { href: `/execution.html?id=${encodeURIComponent(x.id)}`, target: '_blank', title: x.id }, x.id.slice(0,10));
       const chip = el('span', { class: 'chip ' + (x.status==='passed'?'ok':x.status==='failed'?'err':'warn') }, x.status);
       const ts = x.startTime ? new Date(x.startTime).toLocaleString() : '';
-      executions.append(el('li', null, a, ' ', chip, ` — ${x.browser || ''} ${x.device || ''} — ${ts}`));
+      executions.append(el('li', null, a, chip, el('span',{ class:'muted'}, x.browser||''), el('span',{class:'muted'}, ts)));
     });
 
     const reports = document.getElementById('reports');
     reports.innerHTML = '';
     (data.reports || []).forEach((r) => {
-      const a = el('a', { href: `/report.html?id=${encodeURIComponent(r.id)}`, target: '_blank' }, r.id);
+      const a = el('a', { href: `/report.html?id=${encodeURIComponent(r.id)}`, target: '_blank', title: r.id }, r.id.slice(0,10));
       const chip = el('span', { class: 'chip ' + (r.status==='passed'?'ok':r.status==='failed'?'err':'warn') }, r.status||'report');
       const ts = r.created_at ? new Date(r.created_at).toLocaleString() : '';
-      reports.append(el('li', null, a, ' ', chip, ` — ${r.report_path} — ${ts}`));
+      reports.append(el('li', null, a, chip, el('span',{class:'muted'}, ts)));
     });
 
     const tests = document.getElementById('tests');
     tests.innerHTML = '';
     (data.tests || []).forEach((t) => {
-      tests.append(el('li', null, `${t.title} – ${t.status || 'active'}`));
+      const ti = t.title && t.title.length>60 ? t.title.slice(0,57)+'…' : t.title;
+      tests.append(el('li', null, ti));
     });
 
     // Runtime/live status

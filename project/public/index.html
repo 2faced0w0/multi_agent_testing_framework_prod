@@ -31,60 +31,63 @@
       <p class="hint">We only accept public GitHub URLs. Set ALLOWED_REPOS for stricter control.</p>
     </section>
 
-    <section class="grid">
-      <div class="card">
-        <h3>Totals</h3>
-  <ul id="totals" class="loading-block"><li><div class="spinner sm"></div></li></ul>
-      </div>
-      <div class="card">
+    <section class="stats-bar card">
+      <div id="totals" class="stats loading-block"><div class="spinner sm"></div></div>
+    </section>
+
+    <section class="card watchers-section">
+      <div class="section-head">
         <h3>Watchers</h3>
-  <form id="watchers-filter" class="filter-form">
-          <input id="q" type="text" placeholder="search repo (q)" class="flex-1" />
+        <form id="watchers-filter" class="filter-form compact">
+          <input id="q" type="text" placeholder="search repo" class="flex-1" />
           <select id="status">
-            <option value="">status: all</option>
+            <option value="">all statuses</option>
             <option value="active">active</option>
             <option value="pending">pending</option>
             <option value="error">error</option>
           </select>
-          <button type="submit">Apply</button>
-          <button type="button" id="reset">Reset</button>
+          <button type="submit" class="btn-secondary">Filter</button>
+          <button type="button" id="reset" class="btn-secondary">Reset</button>
         </form>
-  <ul id="watchers" class="loading-block"><li><div class="spinner sm"></div></li></ul>
+      </div>
+      <ul id="watchers" class="data-list loading-block"><li><div class="spinner sm"></div></li></ul>
+    </section>
+
+    <section class="grid dashboard-lists">
+      <div class="card">
+        <h3>Executions</h3>
+        <ul id="executions" class="data-list loading-block"><li><div class="spinner sm"></div></li></ul>
       </div>
       <div class="card">
-        <h3>Recent Executions</h3>
-  <ul id="executions" class="loading-block"><li><div class="spinner sm"></div></li></ul>
+        <h3>Reports</h3>
+        <ul id="reports" class="data-list loading-block"><li><div class="spinner sm"></div></li></ul>
       </div>
       <div class="card">
-        <h3>Recent Reports</h3>
-  <ul id="reports" class="loading-block"><li><div class="spinner sm"></div></li></ul>
+        <h3>Test Cases</h3>
+        <ul id="tests" class="data-list loading-block"><li><div class="spinner sm"></div></li></ul>
       </div>
-      <div class="card">
-        <h3>Recent Test Cases</h3>
-  <ul id="tests" class="loading-block"><li><div class="spinner sm"></div></li></ul>
-      </div>
-      <div class="card">
+      <div class="card live-col">
         <h3>Live Status</h3>
-        <div id="runtime">
+        <div id="runtime" class="space-y-2">
           <div class="row-spaced mb-8">
-            <button id="reset-queues" title="Clear default/high/critical queues and DLQ">Reset Queues</button>
+            <button id="reset-queues" class="btn-secondary" title="Clear queues">Reset Queues</button>
             <span id="reset-queues-status" class="hint"></span>
           </div>
-          <div id="queue-stats"></div>
-          <div id="exec-counts"></div>
-          <div class="grid two-col gap-8">
+          <div id="queue-stats" class="text-sm"></div>
+          <div id="exec-counts" class="text-sm"></div>
+          <div class="grid two-col gap-8 small-cols">
             <div>
               <h4>Running</h4>
-              <ul id="running-list"></ul>
+              <ul id="running-list" class="mini-list"></ul>
             </div>
             <div>
               <h4>Queued</h4>
-              <ul id="queued-list"></ul>
+              <ul id="queued-list" class="mini-list"></ul>
             </div>
           </div>
         </div>
       </div>
-      <div class="card card-debug">
+      <div class="card card-debug debug-col">
         <h3 class="debug-header">Debug Log <button id="debug-clear" class="btn-tiny">Clear</button></h3>
         <div id="debug-log" class="debug-log">
           <div class="hint">Network / dashboard diagnostics will appear here.</div>
