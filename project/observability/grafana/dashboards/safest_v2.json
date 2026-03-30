@@ -1,0 +1,17 @@
+{
+  "title": "SAFEST v2 Execution Metrics",
+  "panels": [
+    {
+      "title": "Total Healing Jobs",
+      "type": "stat",
+      "targets": [{"expr": "total_healing_jobs_total"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    },
+    {
+      "title": "LLM Cascade Routes",
+      "type": "bargauge",
+      "targets": [{"expr": "sum by (target) (llm_cascade_routes_total)", "legendFormat": "{{target}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+    }
+  ]
+}

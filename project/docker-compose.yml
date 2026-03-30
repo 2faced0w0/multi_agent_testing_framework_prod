@@ -1,130 +1,54 @@
-services:
-  framework:
-    build:
-      context: .
-      args:
-        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.55.1}
-    image: multi-agent-testing-framework:latest
-    restart: unless-stopped
-    # Run as root in local Windows dev to avoid bind-mount perms issues with SQLite
-    user: "0"
-    environment:
-      NODE_ENV: production
-      PORT: 3000
-      WS_PORT: 3001
-      REDIS_URL: redis://redis:6379
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
-      DATABASE_URL: "sqlite:///app/data/framework.db"
-      JWT_SECRET: "${JWT_SECRET}"
-      MISTRAL_API_KEY: "${MISTRAL_API_KEY}"
-    depends_on:
-      - redis
-    ports:
-      - "3005:3000" # avoid host port 3000 conflict
-      - "3001:3001"
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./generated_tests:/app/generated_tests
-      - ./test_execution_reports:/app/test_execution_reports
-  agents:
-    image: multi-agent-testing-framework:latest
-    restart: unless-stopped
-    user: "0"
-    depends_on:
-      - redis
-    shm_size: '1gb'
-    environment:
-      NODE_ENV: production
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
-      DATABASE_URL: "sqlite:///app/data/framework.db"
-      JWT_SECRET: "${JWT_SECRET}"
-      MISTRAL_API_KEY: "${MISTRAL_API_KEY}"
-      TE_MODE: playwright
-      PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright"
-      # Optionally pin runtime Playwright image via Dockerfile ARG
-      # PLAYWRIGHT_VERSION can be set in .env (e.g., 1.55.1, 1.46.0)
-      # PLAYWRIGHT_VERSION: "${PLAYWRIGHT_VERSION}"
-    command: ["node", "-r", "module-alias/register", "dist/agents/bootstrap.js"]
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./generated_tests:/app/generated_tests
-      - ./test_execution_reports:/app/test_execution_reports
+version: '3.8'
 
-  agents-playwright:
-    image: multi-agent-testing-framework:latest
-    profiles: ["playwright"]
-    restart: unless-stopped
-    user: "0"
-    depends_on:
-      - redis
-    shm_size: '2gb'
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
     environment:
-      NODE_ENV: production
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
-      DATABASE_URL: "sqlite:///app/data/framework.db"
-      JWT_SECRET: "${JWT_SECRET}"
-      MISTRAL_API_KEY: "${MISTRAL_API_KEY}"
-      TE_MODE: playwright
-      PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright"
-      # PLAYWRIGHT_VERSION: "${PLAYWRIGHT_VERSION}"
-    command: ["node", "-r", "module-alias/register", "dist/agents/bootstrap.js"]
+      - OLLAMA_HOST=http://ollama:11434
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./generated_tests:/app/generated_tests
-      - ./test_execution_reports:/app/test_execution_reports
-  prometheus:
-    image: prom/prometheus:v2.54.0
-    restart: unless-stopped
+      - ./backend:/app
     depends_on:
-      - framework
+      - ollama
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app/frontend
+
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  prometheus:
+    image: prom/prometheus:latest
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --web.enable-lifecycle
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
 
-  alertmanager:
-    image: prom/alertmanager:v0.27.0
-    restart: unless-stopped
-    ports:
-      - "9093:9093"
-    volumes:
-      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
   grafana:
-    image: grafana/grafana:10.4.6
-    restart: unless-stopped
-    depends_on:
-      - prometheus
+    image: grafana/grafana:latest
     ports:
-      - "3002:3000" # expose Grafana on localhost:3002
+      - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
     volumes:
-      - ./docs/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./docs/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-volumes:
-  redis_data:
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards

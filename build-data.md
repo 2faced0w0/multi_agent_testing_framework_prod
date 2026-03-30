@@ -1,52 +1,53 @@
-# SAFEST Architecture Migration Plan
+# Full-Stack Greenfield Agentic Architecture: SAFEST v2
 
 ## System Context & Role
-You are an expert AI Systems Architect and Senior Software Engineer. Your task is to refactor a self-healing test automation framework called "SAFEST". You will fundamentally alter its orchestration layer and its LLM utilization strategy. You will nuke the entire original project and build from ground up.
+You are an expert Principal Software Engineer and Cloud Architect. We are building a greenfield, fully containerized, self-healing test automation platform. You will build this architecture from scratch, ensuring modularity, live observability, and an interactive user experience.
 
-## Current Architecture (The "Before" State)
-* **project dir:** D:\multi_agent_testing_framework_prod\project
-* **Codebase:** A hybrid Node.js/TypeScript and Python monorepo.
-* **Messaging:** Agents communicate asynchronously via a custom Redis Pub/Sub event bus.
-* **State Management:** Managed by a `ContextManagerAgent` interacting with Redis.
-* **Orchestration:** A `CI-OrchestratorAgent` acts as a state machine listening to `.completed` events to dispatch the next job.
-* **Agents:** * `PlannerAgent`: Python, uses LangChain and OpenAI to diagnose failures.
-    * `LocatorSynthesiserAgent`: Python, uses scikit-learn for ML fallback predictions.
-    * `VerifierAgent`: TypeScript, uses Playwright to test fixes in an isolated browser.
-* **Pain Point:** The system currently relies exclusively on expensive online LLM APIs (OpenAI) for all test regeneration and diagnosis tasks, resulting in token exhaustion and high costs.
-
-## Target Architecture (The "After" State)
-1.  **Orchestration Swap:** Deprecate the custom Redis Pub/Sub and `ContextManagerAgent`. Replace them with **LangGraph** (Python). LangGraph will handle the cyclical state machine, routing, and memory persistence natively.
-2.  **LLM Cascade Strategy:** Implement a dual-LLM routing system. 
-    * **Tier 1 (Local):** An Ollama-hosted local model (e.g., `qwen2.5-coder:7b` or `phi3:mini`) running within a strict 6GB VRAM constraint. This will act as the first-pass triage and handle simple fixes.
-    * **Tier 2 (Cloud):** The existing OpenAI GPT-4o API. This will be used strictly as a fallback for complex edge cases or when the Tier 1 model yields low confidence.
-3.  **Standardization:** Port the high-level orchestration logic into Python to natively utilize LangGraph. (The TypeScript `VerifierAgent` can either be wrapped in a Python subprocess or ported to `pytest-playwright`).
+## Target Architecture & Tech Stack
+This is a modern, distributed system composed of 5 core layers:
+1.  **Frontend (React.js):** A modular, component-based dashboard built with Vite and TailwindCSS. It uses WebSockets to display live agent execution traces and REST for historical data.
+2.  **Backend API (FastAPI):** Exposes REST endpoints to trigger jobs, WebSockets to stream LangGraph state changes to the UI, and a `/metrics` endpoint for Prometheus.
+3.  **Orchestration (LangGraph):** The core state machine orchestrating the AI agents, utilizing `AsyncSqliteSaver` for checkpointing.
+4.  **LLM Cascade & RAG:** * **Tier 1:** Local `Ollama` container (constrained to 6GB VRAM) running a quantized coder model.
+    * **Tier 2:** Cloud LLM (OpenAI) fallback.
+    * **Context:** `ChromaDB` for lightweight DOM chunk retrieval to save tokens.
+5.  **Observability (Prometheus + Grafana):** Prometheus scrapes the FastAPI metrics. Grafana visualizes LLM token usage, routing metrics, and agent success rates.
 
 ## Execution Plan & Step-by-Step Instructions
 
-### Phase 1: Docker & Dependency Updates
-1. Update `docker-compose.yml` to include an `ollama` service constraint to 6GB VRAM (using `deploy.resources.reservations`). Set it to pull a lightweight coding model (e.g., `ollama run qwen2.5-coder:7b`).
-2. Add `langgraph`, `langchain-community`, and `langchain-ollama` to the Python `requirements.txt`.
+### Phase 1: Docker Orchestration & Scaffolding
+1. Create a monorepo structure with `/frontend`, `/backend`, and `/observability`.
+2. Write a comprehensive `docker-compose.yml` defining the following services:
+    * `frontend`: React.js app on port 3000.
+    * `backend`: FastAPI app on port 8000.
+    * `ollama`: Local LLM runner with a strict 6GB VRAM GPU reservation.
+    * `prometheus`: Scraping `backend:8000/metrics`.
+    * `grafana`: Pre-provisioned to use Prometheus as a data source.
+3. Include standard `requirements.txt` for Python and `package.json` for React.
 
-### Phase 2: Define the LangGraph State
-1. Create a new file `orchestrator/graph_state.py`.
-2. Define a `TypedDict` class named `SafestState` that will replace the old Redis context. It must include fields for: `run_id`, `failure_data`, `diagnosis_confidence`, `proposed_locators`, `verification_status`, and `error_history`.
+### Phase 2: Instrumented FastAPI & LangGraph Setup
+1. In the `backend/`, implement the LangGraph state machine (`SafestState`) with three nodes: `TriageAgent`, `ExpertFallbackAgent`, and `VerifierAgent`.
+2. Implement the LLM routing logic: attempt Ollama first, catch low-confidence/errors, and fallback to OpenAI.
+3. Instrument the FastAPI app with `prometheus_client`. Create custom metrics:
+    * `Counter` for `total_healing_jobs`.
+    * `Histogram` for `agent_node_execution_seconds`.
+    * `Counter` for `llm_cascade_routes` (labels: `target="local" | "cloud"`).
+4. Create a WebSocket endpoint (`/ws/stream/{run_id}`) that streams LangGraph state updates as JSON.
 
-### Phase 3: Implement the LLM Cascade (Model Routing)
-1. In the `PlannerAgent`, implement a routing function.
-2. Initialize an `OllamaLLM` instance. Instruct the local model to perform a rapid triage of the failure context.
-3. Add logic: *IF* the local model returns a simple fix (e.g., a basic CSS selector change) with high confidence, proceed. *IF* the local model fails, encounters a complex logical error, or runs out of context window, gracefully degrade to the `ChatOpenAI` instance.
+### Phase 3: React.js Interactive Dashboard
+1. In the `frontend/`, build a modular React UI using functional components and hooks.
+2. **Component 1 (Trigger Panel):** A form to submit a mocked test failure payload.
+3. **Component 2 (Live Execution Graph):** A visual component that connects to the FastAPI WebSocket. As the LangGraph state updates, visually highlight which agent (Triage, Expert, or Verifier) is currently active, and display its output logs in real-time.
+4. **Component 3 (Metrics Link):** An embedded iframe or link pointing to the Grafana dashboard port.
 
-### Phase 4: Build the LangGraph Nodes and Edges
-1. Convert the core logic of `PlannerAgent`, `LocatorSynthesiserAgent`, and `VerifierAgent` into LangGraph nodes (Python functions that take `SafestState` and return a dict updating that state).
-2. Create `orchestrator/workflow.py`. Initialize a `StateGraph(SafestState)`.
-3. Add the nodes to the graph.
-4. Define the conditional edges. Example: `diagnose_failure` routes to `synthesize_locator` if a stale locator is found, otherwise it ends. `verify_fix` routes to END if successful, or loops back to `synthesize_locator` if the verification fails.
+### Phase 4: DOM RAG Tooling
+1. Write a utility using `BeautifulSoup` to chunk raw HTML error snapshots into semantic trees.
+2. Index these chunks into an ephemeral `ChromaDB` collection and build a retrieval tool for the agents to pull only the relevant DOM neighborhood surrounding a broken locator.
 
-### Phase 5: Clean Up & Deprecation
-1. Once the LangGraph workflow successfully passes an end-to-end test, safely delete the old `BaseAgent.ts`, `ContextManagerAgent.ts`, and `CI-OrchestratorAgent.ts` files.
-2. Remove the Redis Pub/Sub logic from the codebase.
+### Phase 5: Verification Environment
+1. Implement the `VerifierAgent` logic: an isolated Python subprocess that uses `pytest-playwright` to execute the AI-generated locator fix and returns a boolean pass/fail back to the LangGraph state.
 
-## Output Constraints:
-* Show me the code for `graph_state.py` and `workflow.py` first so I can review the LangGraph structure.
-* Ensure all LangChain integrations use the latest `.invoke()` syntax, not the deprecated `.predict()` or `.run()`.
-* Output the updated `docker-compose.yml` to ensure the local Ollama container is properly configured.
+## Output Constraints
+* Start by outputting the `docker-compose.yml` so I can verify the network topology and GPU constraints.
+* Next, output the `backend/main.py` demonstrating the FastAPI WebSocket setup alongside the Prometheus instrumentation.
+* Write clean, modular, and heavily commented code. Ensure all LangChain syntax relies on modern `.invoke()` and `.stream()` methods.

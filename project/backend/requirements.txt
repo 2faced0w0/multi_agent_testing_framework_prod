@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+prometheus_client
+langgraph
+langchain-ollama
+langchain-openai
+langchain-community
+beautifulsoup4
+chromadb
+pytest-playwright
