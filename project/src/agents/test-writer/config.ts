@@ -88,7 +88,7 @@ export function createDefaultTestWriterConfig(
     
     mistral: {
       apiKey: mistralApiKey,
-  model: 'mistral-large-2411',
+  model: 'codestral-2405',
       maxTokens: 4000,
       temperature: 0.3,
       topP: 0.95

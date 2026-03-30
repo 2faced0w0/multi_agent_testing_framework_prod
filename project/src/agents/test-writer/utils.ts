@@ -4,15 +4,16 @@
 
 /**
  * Strip leading/trailing markdown code fences (``` or ```lang) from AI generated content.
- * Handles common variants: ```typescript, ```ts, plain ``` and trailing matching fence.
+ * Handles common variants: ```typescript, ```Typescript, ```ts, plain ``` and trailing matching fence.
+ * Case-insensitive to catch all variants (Typescript, TypeScript, TYPESCRIPT, etc.)
  */
 export function stripCodeFences(input: string): string {
   if (!input) return input;
   let out = input.trimStart();
-  // Leading fence with optional language (allow immediate newline or end)
-  out = out.replace(/^```(?:[a-zA-Z0-9_-]+)?\n?/, '');
+  // Leading fence with optional language (case-insensitive, allow immediate newline or end)
+  out = out.replace(/^```(?:[a-zA-Z0-9_-]+)?[ \t]*(?:\r?\n)?/i, '');
   // Trailing fence (even if not preceded by newline once content trimmed)
-  out = out.replace(/\n?```\s*$/i, '\n');
+  out = out.replace(/[ \t]*\r?\n?```[ \t]*$/i, '\n');
   // If model wrapped everything inside fences but left extra newline at end
   return out.trimEnd() + '\n';
 }

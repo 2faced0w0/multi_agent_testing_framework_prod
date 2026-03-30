@@ -1,6 +1,7 @@
 import type { TestWriterAgentConfig } from './TestWriterAgent';
 import { aiPromptTokensTotal, aiCompletionTokensTotal, aiRequestsTotal } from '@monitoring/promMetrics';
 import { componentAnalysisService } from '../../services/ComponentAnalysisService';
+import { sanitizeGeneratedTest } from './utils';
 
 export interface GeneratedTestResult {
   title: string;
@@ -238,14 +239,18 @@ function extractContent(resp: any): string | undefined {
 }
 
 function ensureTestWrapper(raw: string, title: string, meta: Record<string, any>): string {
+  // First, sanitize to remove any code fences from the model output
+  const sanitized = sanitizeGeneratedTest(raw);
+  
   // If the model already returned an import statement & test() call, keep it.
-  const hasImport = /from\s+'@playwright\/test'/.test(raw) || /@playwright\/test"/.test(raw);
-  const hasTest = /\btest\(/.test(raw);
+  const hasImport = /from\s+'@playwright\/test'/.test(sanitized) || /@playwright\/test"/.test(sanitized);
+  const hasTest = /\btest\(/.test(sanitized);
   if (hasImport && hasTest) {
-    return addHeader(raw, title, meta, 'mistral');
+    return addHeader(sanitized, title, meta, 'mistral');
   }
-  const body = raw.replace(/^```[a-zA-Z]*|```$/g, '');
-  return addHeader(`import { test, expect } from '@playwright/test';\n\n${body}\n`, title, meta, 'mistral');
+  
+  // Otherwise, wrap it
+  return addHeader(`import { test, expect } from '@playwright/test';\n\n${sanitized}\n`, title, meta, 'mistral');
 }
 
 function buildFallback(title: string, payload: any): Omit<GeneratedTestResult, 'provider'> {
@@ -255,12 +260,13 @@ function buildFallback(title: string, payload: any): Omit<GeneratedTestResult, '
     headCommit: payload.headCommit || '',
     generatedAt: new Date().toISOString()
   };
-  const content = addHeader(`import { test, expect } from '@playwright/test';\n\n` +
+  const fallbackCode = `import { test, expect } from '@playwright/test';\n\n` +
     `test('${escapeQuotes(title)}', async ({ page }) => {\n` +
     `  const base = process.env.E2E_BASE_URL || 'http://localhost:3000';\n` +
     `  await page.goto(base);\n` +
     `  await expect(page).toHaveTitle(/.*/);\n` +
-    `});\n`, title, meta, 'fallback');
+    `});\n`;
+  const content = addHeader(fallbackCode, title, meta, 'fallback');
   return { title, content };
 }
 

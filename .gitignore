@@ -1,0 +1,6 @@
+# Data and Logs
+*.db
+*.db-journal
+*.log
+project/data/*.db
+project/logs/*.log

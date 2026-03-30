@@ -147,7 +147,9 @@ async function main(): Promise<void> {
   await Promise.all(Array.from(agents.values()).map((a) => a.initialize()));
 
   // Start message consumer loop
+  console.log('[bootstrap] Starting queue consumer...');
   const consumer = await startQueueConsumer(appCfg.messageQueue, agents);
+  console.log('[bootstrap] Queue consumer started successfully');
 
   // Handle graceful shutdown
   const shutdowns: ShutdownHandler[] = [
@@ -184,7 +186,10 @@ async function startQueueConsumer(mqCfg: MessageQueueConfig, agentMap: Map<strin
   const maxConcurrency = Math.max(1, parseInt(process.env.AGENT_MAX_CONCURRENCY || '4', 10));
   const inFlight = new Set<Promise<void>>();
 
+  console.log(`[consumer] Starting queue consumer with max concurrency: ${maxConcurrency}`);
+
   const pump = async () => {
+    console.log('[consumer] Pump loop started');
     // keep filling up to maxConcurrency
     while (!stopped) {
       try {
@@ -193,18 +198,29 @@ async function startQueueConsumer(mqCfg: MessageQueueConfig, agentMap: Map<strin
           continue;
         }
         const msg = await mq.consumeNext();
-        if (!msg) continue; // timeout
+        if (!msg) {
+          // Timeout - log periodically for debugging
+          if (Math.random() < 0.1) console.log('[consumer] No message (timeout), continuing...');
+          continue;
+        }
+        console.log(`[consumer] Received message: ${msg.messageType} for ${msg.target?.type} (ID: ${msg.id})`);
         const targetType = msg.target?.type;
         const agentKey = normalizeTargetType(targetType || '');
+        console.log(`[consumer] Target: ${targetType}, Normalized: ${agentKey}, Agent found: ${agentKey ? agentMap.has(agentKey) : false}`);
         const agent = agentKey ? agentMap.get(agentKey) : undefined;
         if (!agent) {
-          console.warn(`[consumer] No agent for target ${targetType} (normalized: ${agentKey}), failing message`);
+          console.warn(`[consumer] No agent for target ${targetType} (normalized: ${agentKey}), failing message ${msg.id}`);
           await mq.failMessage(msg.id, msg);
           continue;
         }
+        console.log(`[consumer] Dispatching message ${msg.id} to ${agentKey}`);
         const tracked = (async () => {
           try {
             await agent.handleIncomingMessage(msg);
+            console.log(`[consumer] Message ${msg.id} handled successfully by ${agentKey}`);
+          } catch (handlerErr) {
+            console.error(`[consumer] Error handling message ${msg.id} in ${agentKey}:`, (handlerErr as Error)?.message, (handlerErr as Error)?.stack);
+            throw handlerErr;
           } finally {
             // no-op
           }
@@ -213,12 +229,18 @@ async function startQueueConsumer(mqCfg: MessageQueueConfig, agentMap: Map<strin
         });
         inFlight.add(tracked);
       } catch (err) {
-        console.error('[consumer] Error in loop:', (err as Error)?.message);
+        console.error('[consumer] Error in loop:', (err as Error)?.message, (err as Error)?.stack);
         await new Promise((r) => setTimeout(r, 250));
       }
     }
+    console.log('[consumer] Pump loop stopped');
   };
   const loop = pump();
+
+  // Log any unhandled errors from pump loop
+  loop.catch((err) => {
+    console.error('[consumer] FATAL: Pump loop crashed:', err);
+  });
 
   return {
     stop: async () => {

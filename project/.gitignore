@@ -33,3 +33,9 @@ pnpm-debug.log*
 .parcel-cache/
 .turbo/
 .vercel/
+
+Dissertation Generation Instructions.md
+# Data and Logs
+*.db
+*.db-journal
+*.log

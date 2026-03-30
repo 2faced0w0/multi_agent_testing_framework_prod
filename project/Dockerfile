@@ -8,6 +8,7 @@ WORKDIR /app
 
 # Install deps
 COPY package*.json ./
+COPY scripts ./scripts
 RUN npm ci
 
 # Copy source
@@ -15,6 +16,14 @@ COPY tsconfig.json ./
 COPY src ./src
 
 # Build
+RUN npm run build
+
+# Build React dashboard
+FROM node:20-slim AS react-builder
+WORKDIR /app/public-react
+COPY public-react/package*.json ./
+RUN npm ci
+COPY public-react/ ./
 RUN npm run build
 
 # Runtime with preinstalled browsers and dependencies
@@ -27,6 +36,7 @@ COPY --from=base /app/package*.json ./
 COPY --from=base /app/node_modules ./node_modules
 RUN npm prune --omit=dev || true
 COPY --from=base /app/dist ./dist
+COPY --from=react-builder /app/public-react-build ./public-react-build
 COPY public ./public
 
 # Data/logs dirs

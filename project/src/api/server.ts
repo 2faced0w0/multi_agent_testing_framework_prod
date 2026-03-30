@@ -105,22 +105,22 @@ app.get('/metrics', async (_req, res) => {
   }
 });
 
-// Static dashboard (served from public/) with light cache-busting support
+// Static React dashboard (served from public-react-build/) with cache-busting support
 app.use((req, res, next) => {
-  // Force revalidation for core assets to avoid stale container cache
-  if (/\/app\.js$/.test(req.path) || /index\.html$/.test(req.path)) {
+  // Force revalidation for index.html to avoid stale container cache
+  if (/index\.html$/.test(req.path) || req.path === '/') {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   }
   next();
 });
-// Strict CSP for dashboard assets (no inline scripts). We inject before static so it applies to index.html and app.js
+// CSP for React dashboard (allows bundled inline scripts from Vite)
 app.use((req, res, next) => {
-  if (req.path === '/' || req.path === '/index.html' || req.path === '/app.js' || req.path === '/styles.css') {
-    // Adjust connect-src to include EventSource (same-origin) and optional websocket
+  if (req.path === '/' || req.path === '/index.html' || /\.js$/.test(req.path) || /\.css$/.test(req.path)) {
+    // More permissive CSP for React build with bundled assets
     const csp = [
       "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self' data:",
       "connect-src 'self'",
@@ -132,7 +132,11 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(express.static('public', { index: ['index.html'], cacheControl: true, etag: true, maxAge: '5m' }));
+// Serve legacy static pages and assets from public/ directory (execution.html, report.html, /js, /css)
+app.use(express.static('public', { index: false }));
+
+// Serve React dashboard as the main application
+app.use(express.static('public-react-build', { index: ['index.html'], cacheControl: true, etag: true, maxAge: '5m' }));
 // Read-only static access to generated reports (for HTML viewing)
 // Relax CSP only for this route to allow Playwright report's inline scripts/styles
 app.use('/reports-static', (_req, res, next) => {

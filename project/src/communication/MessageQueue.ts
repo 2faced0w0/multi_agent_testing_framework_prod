@@ -35,17 +35,23 @@ export class MessageQueue {
 
   async sendMessage(msg: AgentMessage & { idempotencyKey?: string }): Promise<void> {
     if (!this.client || !this.client.isOpen) throw new Error('MQ not initialized');
+    console.log(`[MQ] sendMessage called: type=${msg.messageType}, priority=${msg.priority}, target=${msg.target?.type}`);
     // Idempotency guard
     if (msg.idempotencyKey) {
       const idemKey = this.idempotencyPrefix + msg.idempotencyKey;
       const wasSet = await this.client.set(idemKey, '1', { NX: true, PX: 1000 * 60 * 60 }); // 1h
-      if (wasSet !== 'OK') return; // duplicate, drop silently
+      if (wasSet !== 'OK') {
+        console.log(`[MQ] Message dropped due to idempotency: ${msg.idempotencyKey}`);
+        return; // duplicate, drop silently
+      }
     }
     // Priority routing
     const pri = (msg.priority || 'normal') as any;
     const queue = pri === 'critical' ? this.cfg.queues.critical : pri === 'high' ? this.cfg.queues.high : this.cfg.queues.default;
+    console.log(`[MQ] Routing to queue: ${queue} (priority: ${pri}, comparison: pri='${pri}' === 'high' is ${pri === 'high'})`);
     const payload = { ...msg, enqueuedAt: Date.now() };
     await this.client.lPush(queue, JSON.stringify(payload));
+    console.log(`[MQ] Message pushed to ${queue}`);
     // Audit log
   await this.client.lPush(this.auditListKey, JSON.stringify({ type: 'send', ts: Date.now(), queue, msgId: (msg as any).id, target: msg.target, messageType: (msg as any).messageType }));
     await this.client.lTrim(this.auditListKey, 0, this.auditMaxLen - 1);
@@ -67,10 +73,22 @@ export class MessageQueue {
   async consumeNext(queues?: string[], timeoutSeconds = 5): Promise<AgentMessage | null> {
     if (!this.client || !this.client.isOpen) throw new Error('MQ not initialized');
     const keys = queues && queues.length ? queues : [this.cfg.queues.critical, this.cfg.queues.high, this.cfg.queues.default];
+  console.log(`[MQ] consumeNext polling queues: ${keys.join(', ')}`);
   const res = await this.client.blPop(keys, timeoutSeconds);
-  if (!res) return null;
+  if (!res) {
+    console.log('[MQ] consumeNext: no message (timeout)');
+    return null;
+  }
+  console.log(`[MQ] consumeNext got message from queue: ${res.key}`);
     const { key, element } = res as any;
-    const msg: AgentMessage & { id?: string; enqueuedAt?: number } = JSON.parse(element);
+    let msg: AgentMessage & { id?: string; enqueuedAt?: number };
+    try {
+      msg = JSON.parse(element);
+      console.log(`[MQ] Parsed message: ${msg.messageType} for ${msg.target?.type}`);
+    } catch (parseErr) {
+      console.error('[MQ] JSON parse error for element:', element.substring(0, 200), 'Error:', (parseErr as Error).message);
+      throw parseErr;
+    }
     // Observe queue wait if we have the original enqueue timestamp
     if (msg.enqueuedAt && typeof msg.enqueuedAt === 'number') {
       const waitSeconds = (Date.now() - msg.enqueuedAt) / 1000;

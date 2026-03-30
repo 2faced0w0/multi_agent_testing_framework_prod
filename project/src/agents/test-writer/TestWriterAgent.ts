@@ -60,14 +60,18 @@ export class TestWriterAgent extends BaseAgent {
 
     const payload: any = message.payload || {};
     const id = uuidv4();
-    // Call AI generator (with fallback safety inside the module)
+    // Call AI generator (includes sanitization of code fences before header is added)
     const gen = await generatePlaywrightTest(payload, this.twConfig);
     const title = gen.title;
-    // Sanitize content (fences, html scaffolding, excess blank lines)
-    let content = sanitizeGeneratedTest(gen.content);
+    // Content is already sanitized in the generator
+    const content = gen.content;
     const debugSan = process.env.TEST_SANITIZE_LOG === 'true';
     if (debugSan) {
-      this.log('debug', 'TestWriterAgent sanitation applied', { lengthBefore: gen.content.length, lengthAfter: content.length, changed: gen.content !== content });
+      this.log('debug', 'TestWriterAgent received generated test', { 
+        provider: gen.provider,
+        model: gen.model,
+        contentLength: content.length 
+      });
     }
 
     // Ensure target directory exists
@@ -129,14 +133,7 @@ export class TestWriterAgent extends BaseAgent {
     }
 
   if (compileOk) {
-      // Last-chance safeguard: if any residual leading code fence slipped through (model edge case), re-sanitize & overwrite.
-      if (/^```/.test(content)) {
-        try {
-          content = sanitizeGeneratedTest(content);
-          await fs.writeFile(filePath, content, 'utf8');
-          if (debugSan) this.log('debug', 'Late re-sanitize applied (leading fence detected)', { filePath });
-        } catch {}
-      }
+      // Note: Sanitization now happens in mistralGenerator.ts before header is added
       try {
         await this.sendMessage({
           target: { type: 'TestExecutor' },
