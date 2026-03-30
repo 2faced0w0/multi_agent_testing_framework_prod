@@ -4,3 +4,4 @@
 *.log
 project/data/*.db
 project/logs/*.log
+project/.env

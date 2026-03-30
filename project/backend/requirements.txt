@@ -3,8 +3,10 @@ uvicorn
 prometheus_client
 langgraph
 langchain-ollama
-langchain-openai
+langchain-mistralai
 langchain-community
 beautifulsoup4
 chromadb
 pytest-playwright
+python-dotenv
+GitPython
