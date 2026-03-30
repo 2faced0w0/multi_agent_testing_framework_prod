@@ -5,3 +5,5 @@
 project/data/*.db
 project/logs/*.log
 project/.env
+node_modules/*
+project/frontend/node_modules/*
