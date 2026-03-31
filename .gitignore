@@ -7,3 +7,7 @@ project/logs/*.log
 project/.env
 node_modules/*
 project/frontend/node_modules/*
+safest/*
+project/backend/__pycache__/*
+project/backend/orchestrator/__pycache__/*
+project/backend/.pytest_cache/*

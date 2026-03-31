@@ -1,13 +1,48 @@
 import subprocess
+import asyncio
+from playwright.async_api import async_playwright
+from typing import Dict, Any
+
+async def run_with_telemetry(url: str, locator_fix: dict) -> Dict[str, Any]:
+    """
+    Launches a headless Playwright browser, injects console/network listeners
+    to capture browser telemetry, and returns logs alongside the pass/fail result.
+    """
+    browser_logs = []
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+
+        # Capture JS console output
+        page.on('console', lambda msg: browser_logs.append(f'[CONSOLE {msg.type.upper()}] {msg.text}'))
+
+        # Capture network failures (4xx/5xx)
+        async def on_response(response):
+            if response.status >= 400:
+                browser_logs.append(f'[NETWORK {response.status}] {response.url}')
+        page.on('response', on_response)
+
+        passed = False
+        try:
+            await page.goto(url, timeout=10000)
+            element = page.locator(locator_fix.get('locator', ''))
+            await element.wait_for(timeout=5000)
+            passed = True
+        except Exception as e:
+            browser_logs.append(f'[PLAYWRIGHT ERROR] {str(e)}')
+
+        await browser.close()
+
+    return {
+        'passed': passed,
+        'browser_logs': '\n'.join(browser_logs)
+    }
 
 def run_isolated_test(locator_fix: dict) -> bool:
-    """Uses pytest-playwright to verify the proposed DOM locator fix in isolation."""
-    # Assuming standard pytest structure tests/test_healing.py
-    # We would write the locator to a temp config or pass via ENV
+    """Sync wrapper for backwards compatibility."""
     try:
-        # Mocking the subprocess call
-        # result = subprocess.run(["pytest", "tests/test_healing.py"], check=True, capture_output=True)
-        # return True if result.returncode == 0 else False
-        return True
-    except subprocess.CalledProcessError:
+        result = asyncio.run(run_with_telemetry('http://localhost:3000', locator_fix))
+        return result['passed']
+    except Exception:
         return False

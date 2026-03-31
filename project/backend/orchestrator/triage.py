@@ -4,23 +4,28 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from typing import Literal
 import json
+import os
 
-ollama_llm = OllamaLLM(model="qwen2.5-coder:7b", base_url="http://ollama:11434", format="json")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+ollama_llm = OllamaLLM(model="qwen2.5-coder:7b", base_url=OLLAMA_HOST, format="json")
 
 triage_prompt = PromptTemplate.from_template("""
-You are a test failure diagnostician. Analyze the error trace, DOM snapshot, and browser logs.
-You MUST output a valid JSON object matching this schema:
-{{
-    "category": "<STALE_LOCATOR|APP_BUG|TIMING_ISSUE|UNKNOWN>",
-    "confidence": <0.0 to 1.0>,
-    "reason": "<brief explanation>"
-}}
+You are an AI Diagnostician evaluating a failed Playwright test. Analyze the Error Trace, the DOM Context, and the Browser Logs. You must classify the root cause into one of the following strict categories:
 
-Guidelines for category:
-- STALE_LOCATOR: selector not found, element not interactable, no DOM changes logged, missing ID/class.
-- APP_BUG: JS console exceptions, HTTP 4xx/5xx in network logs, React error boundaries mentioned.
-- TIMING_ISSUE: timeouts with no console errors, flaky assertions that might pass on retry.
-- UNKNOWN: insufficient signal to decide.
+1. **STALE_LOCATOR:** Use this if the test failed to find an element. 
+   - CRITICAL RULE: If the error trace contains `TimeoutError` AND mentions `waiting for locator(...)`, this is almost ALWAYS a `STALE_LOCATOR`. It means the CSS selector is wrong or missing from the DOM. It does NOT mean the application is slow.
+2. **APP_BUG:** Use this ONLY if the test failed AND the Browser Logs show a severe 4xx/5xx HTTP error or a critical JavaScript console exception indicating the UI itself crashed.
+3. **TIMING_ISSUE:** Use this ONLY if the element IS present in the final DOM Context snapshot, but Playwright failed to interact with it in time.
+4. **ASSERTION_MISMATCH:** Use this if a `TimeoutError` occurs on a verification or assertion step (e.g., `wait_for_selector`, `expect`, or looking for a success/failure message). 
+   - Look at the DOM Context. If the DOM Context clearly shows that the application *did* reach the intended state (e.g., you see "Order Confirmed", "Thank You", or a dashboard UI), but the specific element the test was looking for is missing, classify this as an `ASSERTION_MISMATCH`. The UI is correct, but the test's assertion logic is outdated.
+5. **UNKNOWN:** insufficient signal to decide.
+
+You MUST output a valid JSON object matching this schema. Output your classification category exactly as written above, followed by a brief reasoning:
+{{
+    "category": "<STALE_LOCATOR|APP_BUG|TIMING_ISSUE|ASSERTION_MISMATCH|UNKNOWN>",
+    "confidence": <0.0 to 1.0>,
+    "reason": "<brief explanation here>"
+}}
 
 Input Data:
 Failure Data: {failure_data}
@@ -41,7 +46,7 @@ def triage_agent(state: SafestState) -> SafestState:
         reason = response.get("reason", "No reason provided")
         
         # Ensure category is one of the allowed literals
-        if category not in ["STALE_LOCATOR", "APP_BUG", "TIMING_ISSUE", "UNKNOWN"]:
+        if category not in ["STALE_LOCATOR", "APP_BUG", "TIMING_ISSUE", "ASSERTION_MISMATCH", "UNKNOWN"]:
             category = "UNKNOWN"
             
         local_response = f"Triage [{category}] ({confidence}): {reason}"

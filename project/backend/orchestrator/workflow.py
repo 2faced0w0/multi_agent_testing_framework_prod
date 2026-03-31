@@ -7,7 +7,7 @@ def route_triage(state: SafestState) -> str:
     category = state.get("diagnosis_category", "UNKNOWN")
     if category == "APP_BUG":
         return "escalate"
-    elif category == "STALE_LOCATOR":
+    elif category in ["STALE_LOCATOR", "ASSERTION_MISMATCH"]:
         return "synthesize" 
     else:
         # TIMING_ISSUE or UNKNOWN

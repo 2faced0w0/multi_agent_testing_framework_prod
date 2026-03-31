@@ -35,9 +35,35 @@ def escalate_to_human_node(state: SafestState) -> SafestState:
     state["verification_status"] = "escalated"
     return state
 
-def synthesizer_agent(state: SafestState) -> SafestState:
-    if "error_history" not in state:
-        state["error_history"] = []
-    state["error_history"].append("Synthesizer generating new locators...")
-    return state
+synthesizer_prompt = PromptTemplate.from_template("""
+You are an Expert SDET responsible for healing broken Playwright tests. You will receive the broken test code, the error trace, the actual DOM context at the time of failure, and a diagnosis category.
 
+CRITICAL INSTRUCTIONS BASED ON DIAGNOSIS:
+- If `diagnosis_category` is `STALE_LOCATOR`: Find the new element in the DOM and replace the broken CSS selector in the test code.
+- If `diagnosis_category` is `ASSERTION_MISMATCH`: The application successfully transitioned to a new state, but the test is asserting the wrong thing. You have permission to completely REWRITE the failing assertion line. Look at the provided DOM Context, identify the new semantic indicator of success (e.g., an `<h1>` with "Order Confirmed", a new status badge, etc.), and write a modern Playwright assertion (e.g., `expect(page.locator("h1")).to_contain_text("Order Confirmed")`) to verify this new state. Remove the old `wait_for_selector` if it is no longer relevant.
+
+Output ONLY valid, runnable Python code.
+
+Diagnosis Category: {diagnosis_category}
+Broken Test Code: {generated_code}
+Error Trace: {error}
+""")
+
+def synthesizer_agent(state: SafestState) -> SafestState:
+    chain = synthesizer_prompt | mistral_llm
+    try:
+        response = chain.invoke({
+            "diagnosis_category": state.get("diagnosis_category", "UNKNOWN"),
+            "generated_code": state.get("failure_data", {}).get("generated_code", ""),
+            "error": state.get("failure_data", {}).get("error", ""),
+        }).content
+        if "error_history" not in state:
+            state["error_history"] = []
+        state["error_history"].append(f"Synthesized fixed code:\n{response[:100]}...")
+        # update failure_data with new code
+        state["failure_data"]["generated_code"] = response
+    except Exception as e:
+        if "error_history" not in state:
+            state["error_history"] = []
+        state["error_history"].append(f"Synthesizer failed: {e}")
+    return state

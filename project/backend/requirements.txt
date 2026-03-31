@@ -10,3 +10,4 @@ chromadb
 pytest-playwright
 python-dotenv
 GitPython
+pytest-html

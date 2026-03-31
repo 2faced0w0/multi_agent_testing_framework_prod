@@ -2,44 +2,92 @@ import { useState, useRef, useEffect } from 'react';
 
 const EVENT_COLORS = {
   code:        '#7dd3fc',
-  stdout:      '#a3e635',
+  stdout:      '#94a3b8', // subtle for raw logs
   stderr:      '#f87171',
   error:       '#f87171',
-  status:      '#94a3b8',
-  graph_state: '#c084fc',
+  status:      '#38bdf8', // bright blue for process steps
+  graph_state: '#c084fc', // purple for healing steps
+  report:      '#34d399', // green for success/artifacts
   done:        '#34d399',
 };
 
 function TerminalLine({ event }) {
+  const [showRaw, setShowRaw] = useState(false);
   const color = EVENT_COLORS[event.type] || '#e2e8f0';
+  
   const prefix = {
     code: '📄 GENERATED',
     stdout: '▶',
     stderr: '✖',
     error:  '✖ ERROR',
     status: '…',
-    graph_state: '🔗 GRAPH',
+    graph_state: '🔗 HEALING',
+    report: '📊 REPORT',
     done: '✔',
   }[event.type] || '·';
 
+  if (event.type === 'report') {
+    return (
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'rgba(52,211,153,0.05)', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(52,211,153,0.2)' }}>
+        <span style={{ color, fontSize: '0.7rem', fontWeight: 700 }}>{prefix}</span>
+        <span style={{ color: 'var(--text-primary)', fontSize: '0.75rem', fontWeight: 600 }}>Execution environment ready.</span>
+        <a 
+          href={`http://localhost:8000/reports/${event.content}/report.html`} 
+          target="_blank" 
+          rel="noreferrer"
+          style={{ 
+            marginLeft: 'auto', background: color, color: '#000', 
+            padding: '3px 10px', borderRadius: 4, fontSize: '0.7rem', 
+            fontWeight: 700, textDecoration: 'none' 
+          }}
+        >
+          VIEW HTML REPORT
+        </a>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-      <span style={{ color, fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap', paddingTop: 1 }}>
-        {prefix}
-      </span>
-      <pre className="mono" style={{
-        color, fontSize: '0.75rem', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-        flex: 1,
-      }}>
-        {event.type === 'graph_state'
-          ? JSON.stringify(JSON.parse(event.content), null, 2)
-          : event.content}
-      </pre>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+        <span style={{ color, fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap', paddingTop: 1 }}>
+          {prefix}
+        </span>
+        <div style={{ flex: 1 }}>
+          <pre className="mono" style={{
+            color: event.type === 'stdout' ? 'var(--text-muted)' : color, 
+            fontSize: event.type === 'stdout' ? '0.7rem' : '0.75rem', 
+            margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            fontWeight: (event.type === 'status' || event.type === 'graph_state') ? 600 : 400
+          }}>
+            {event.content}
+          </pre>
+          
+          {event.type === 'graph_state' && event.raw && (
+            <div style={{ marginTop: 4 }}>
+              <button 
+                onClick={() => setShowRaw(!showRaw)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.65rem', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
+              >
+                {showRaw ? 'Hide technical details' : 'Show technical details'}
+              </button>
+              {showRaw && (
+                <pre className="mono" style={{ 
+                  fontSize: '0.65rem', color: '#94a3b8', background: 'rgba(0,0,0,0.2)', 
+                  padding: 8, borderRadius: 4, marginTop: 4, overflowX: 'auto' 
+                }}>
+                  {JSON.stringify(JSON.parse(event.raw), null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-export default function TestGeneratorChat() {
+export default function TestGeneratorChat({ targetUrl, onHealingStarted }) {
   const [messages,   setMessages]   = useState([]);
   const [terminal,   setTerminal]   = useState([]);
   const [input,      setInput]      = useState('');
@@ -57,7 +105,7 @@ export default function TestGeneratorChat() {
   }, [messages]);
 
   const handleSend = () => {
-    if (!input.trim() || isRunning) return;
+    if (!input.trim() || isRunning || !targetUrl.trim()) return;
     const userMessage = input.trim();
     setInput('');
     setTerminal([]);
@@ -68,16 +116,44 @@ export default function TestGeneratorChat() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ message: userMessage }));
+      ws.send(JSON.stringify({ prompt: userMessage, target_url: targetUrl }));
     };
 
     let generatedCode = '';
+    let lastReportUrl = null;
+
     ws.onmessage = (ev) => {
       const event = JSON.parse(ev.data);
       setTerminal(prev => [...prev, event]);
 
       if (event.type === 'code') {
         generatedCode = event.content;
+      }
+      if (event.type === 'report') {
+        lastReportUrl = `http://localhost:8000/reports/${event.content}/report.html`;
+      }
+
+      if (event.type === 'heal_job_started') {
+        setIsRunning(false);
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          code: generatedCode,
+          summary: "⚠️ Test execution failed. Redirecting to Healing Pipeline...",
+          reportUrl: lastReportUrl
+        }]);
+        ws.close();
+        if (onHealingStarted) onHealingStarted(event.run_id);
+      }
+
+      if (event.type === 'error') {
+        setIsRunning(false);
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          code: null,
+          summary: event.content,
+          reportUrl: null
+        }]);
+        ws.close();
       }
 
       if (event.type === 'done') {
@@ -86,6 +162,7 @@ export default function TestGeneratorChat() {
           role: 'assistant',
           code: generatedCode,
           summary: event.content,
+          reportUrl: lastReportUrl
         }]);
         ws.close();
       }
@@ -133,6 +210,18 @@ export default function TestGeneratorChat() {
                     <p style={{ color: 'var(--success)', fontSize: '0.78rem', fontWeight: 600, marginBottom: msg.code ? 8 : 0 }}>
                       {msg.summary}
                     </p>
+                    {msg.reportUrl && (
+                      <div style={{ marginBottom: 12 }}>
+                        <a 
+                          href={msg.reportUrl} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          style={{ fontSize: '0.72rem', color: '#34d399', textDecoration: 'underline' }}
+                        >
+                          View Execution Report
+                        </a>
+                      </div>
+                    )}
                     {msg.code && (
                       <pre className="mono" style={{
                         fontSize: '0.72rem', color: '#7dd3fc',
@@ -157,20 +246,20 @@ export default function TestGeneratorChat() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSend()}
-              placeholder="Write a test that clicks the login button…"
-              disabled={isRunning}
+              placeholder={!targetUrl.trim() ? "Set a Target Live URL in Healing Pipeline settings first..." : "Write a test that clicks the login button…"}
+              disabled={isRunning || !targetUrl.trim()}
               style={{
                 flex: 1, background: 'var(--bg-surface)', border: '1px solid var(--border)',
                 borderRadius: 7, padding: '8px 12px', color: 'var(--text-primary)',
-                fontSize: '0.82rem', outline: 'none', opacity: isRunning ? 0.6 : 1,
+                fontSize: '0.82rem', outline: 'none', opacity: (isRunning || !targetUrl.trim()) ? 0.6 : 1,
               }}
             />
             <button
               id="chat-send-btn"
               className="btn-primary"
               onClick={handleSend}
-              disabled={isRunning || !input.trim()}
-              style={{ padding: '8px 16px', opacity: (isRunning || !input.trim()) ? 0.6 : 1 }}
+              disabled={isRunning || !input.trim() || !targetUrl.trim()}
+              style={{ padding: '8px 16px', opacity: (isRunning || !input.trim() || !targetUrl.trim()) ? 0.6 : 1 }}
             >
               {isRunning ? '⏳' : '→'}
             </button>
@@ -191,7 +280,7 @@ export default function TestGeneratorChat() {
             flex: 1, background: 'var(--bg-base)', borderRadius: 8,
             border: '1px solid var(--border)', padding: '12px 14px',
             overflowY: 'auto', maxHeight: 380,
-            display: 'flex', flexDirection: 'column', gap: 4,
+            display: 'flex', flexDirection: 'column', gap: 6,
           }}>
             {terminal.length === 0 ? (
               <p className="mono" style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>

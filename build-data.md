@@ -1,53 +1,96 @@
-# Full-Stack Greenfield Agentic Architecture: SAFEST v2
+# SAFEST v2 Project Build Data & Handover Context
 
-## System Context & Role
-You are an expert Principal Software Engineer and Cloud Architect. We are building a greenfield, fully containerized, self-healing test automation platform. You will build this architecture from scratch, ensuring modularity, live observability, and an interactive user experience.
+**Project Name**: SAFEST v2 (Self-Healing Automated Functional Evaluation & Semantic Testing)  
+**Status**: Feature Extensions Phase 1 & 2 Complete  
+**Last Updated**: 2026-03-31  
 
-## Target Architecture & Tech Stack
-This is a modern, distributed system composed of 5 core layers:
-1.  **Frontend (React.js):** A modular, component-based dashboard built with Vite and TailwindCSS. It uses WebSockets to display live agent execution traces and REST for historical data.
-2.  **Backend API (FastAPI):** Exposes REST endpoints to trigger jobs, WebSockets to stream LangGraph state changes to the UI, and a `/metrics` endpoint for Prometheus.
-3.  **Orchestration (LangGraph):** The core state machine orchestrating the AI agents, utilizing `AsyncSqliteSaver` for checkpointing.
-4.  **LLM Cascade & RAG:** * **Tier 1:** Local `Ollama` container (constrained to 6GB VRAM) running a quantized coder model.
-    * **Tier 2:** Cloud LLM (OpenAI) fallback.
-    * **Context:** `ChromaDB` for lightweight DOM chunk retrieval to save tokens.
-5.  **Observability (Prometheus + Grafana):** Prometheus scrapes the FastAPI metrics. Grafana visualizes LLM token usage, routing metrics, and agent success rates.
+---
 
-## Execution Plan & Step-by-Step Instructions
+## 🚀 Architecture Overview
 
-### Phase 1: Docker Orchestration & Scaffolding
-1. Create a monorepo structure with `/frontend`, `/backend`, and `/observability`.
-2. Write a comprehensive `docker-compose.yml` defining the following services:
-    * `frontend`: React.js app on port 3000.
-    * `backend`: FastAPI app on port 8000.
-    * `ollama`: Local LLM runner with a strict 6GB VRAM GPU reservation.
-    * `prometheus`: Scraping `backend:8000/metrics`.
-    * `grafana`: Pre-provisioned to use Prometheus as a data source.
-3. Include standard `requirements.txt` for Python and `package.json` for React.
+SAFEST v2 is an autonomous test-healing and generation platform built on a 5-layer agentic architecture.
 
-### Phase 2: Instrumented FastAPI & LangGraph Setup
-1. In the `backend/`, implement the LangGraph state machine (`SafestState`) with three nodes: `TriageAgent`, `ExpertFallbackAgent`, and `VerifierAgent`.
-2. Implement the LLM routing logic: attempt Ollama first, catch low-confidence/errors, and fallback to OpenAI.
-3. Instrument the FastAPI app with `prometheus_client`. Create custom metrics:
-    * `Counter` for `total_healing_jobs`.
-    * `Histogram` for `agent_node_execution_seconds`.
-    * `Counter` for `llm_cascade_routes` (labels: `target="local" | "cloud"`).
-4. Create a WebSocket endpoint (`/ws/stream/{run_id}`) that streams LangGraph state updates as JSON.
+- **Frontend**: React 18, Vite, TailwindCSS (Vanilla CSS for custom components). Modern minimalist dark theme with ambient UI effects.
+- **Backend**: FastAPI (Python 3.11+).
+- **Orchestration**: LangGraph (State machine for complex multi-agent reasoning loops).
+- **LLM Cascade**:
+  - **Tier 1 (Local)**: Ollama (`qwen2.5-coder:7b`) for code generation, triage, and natural language log summarisation.
+  - **Tier 2 (Cloud)**: Mistral AI (`mistral-large-latest`) for complex expert-level failure diagnosis fallback.
+- **Vector DB**: ChromaDB for RAG-based codebase context retrieval.
+- **Observability**: Prometheus (metrics) and Grafana (dashboards) integrated for real-time pipeline telemetry.
 
-### Phase 3: React.js Interactive Dashboard
-1. In the `frontend/`, build a modular React UI using functional components and hooks.
-2. **Component 1 (Trigger Panel):** A form to submit a mocked test failure payload.
-3. **Component 2 (Live Execution Graph):** A visual component that connects to the FastAPI WebSocket. As the LangGraph state updates, visually highlight which agent (Triage, Expert, or Verifier) is currently active, and display its output logs in real-time.
-4. **Component 3 (Metrics Link):** An embedded iframe or link pointing to the Grafana dashboard port.
+---
 
-### Phase 4: DOM RAG Tooling
-1. Write a utility using `BeautifulSoup` to chunk raw HTML error snapshots into semantic trees.
-2. Index these chunks into an ephemeral `ChromaDB` collection and build a retrieval tool for the agents to pull only the relevant DOM neighborhood surrounding a broken locator.
+## 🛠️ Key Features Implemented
 
-### Phase 5: Verification Environment
-1. Implement the `VerifierAgent` logic: an isolated Python subprocess that uses `pytest-playwright` to execute the AI-generated locator fix and returns a boolean pass/fail back to the LangGraph state.
+### 1. Smart Triage & Autonomous Healing (LangGraph)
+- **Files**: `backend/orchestrator/` (`workflow.py`, `state.py`, `triage.py`, `agents.py`).
+- **Logic**: A 5-node graph classifies test failures using a strict JSON rubric.
+- **Safeguard**: Differentiates between `STALE_LOCATOR` (auto-heals) and `APP_BUG` (escalates to human, halts loop).
+- **Telemetry**: `backend/verifier.py` uses Playwright async listeners to capture JS console errors and network failures (4xx/5xx) as diagnostic input.
 
-## Output Constraints
-* Start by outputting the `docker-compose.yml` so I can verify the network topology and GPU constraints.
-* Next, output the `backend/main.py` demonstrating the FastAPI WebSocket setup alongside the Prometheus instrumentation.
-* Write clean, modular, and heavily commented code. Ensure all LangChain syntax relies on modern `.invoke()` and `.stream()` methods.
+### 2. Dynamic Repository Ingestion (RAG)
+- **File**: `backend/repo_ingestion.py`.
+- **Logic**: Shallow clones GitHub repos (supports private via `GITHUB_TOKEN`), chunks `.js/.ts/.jsx/.html` files, and indexes them into ChromaDB.
+- **UI**: "Connect Codebase" panel in the dashboard.
+
+### 3. Agentic Chat & Test Sandbox
+- **File**: `backend/chat_executor.py`, `frontend/src/components/TestGeneratorChat.jsx`.
+- **Flow**: User Message → ChromaDB Context Lookup → Ollama Code Generation → Subprocess Sandbox Execution → HTML Report Generation.
+- **Auto-Healing**: If a generated test fails in the sandbox, the healing pipeline is automatically triggered and streams progress back to the chat terminal.
+
+### 4. HTML Reporting & Management
+- **Persistence**: All runs saved to `generated_tests/run_<timestamp>/`.
+- **Artifacts**: Contains `test_script.py` and a self-contained `report.html` (via `pytest-html`).
+- **UI**: Dedicated "Reports" tab with a list view, delete functionality, and open-in-new-tab links.
+
+---
+
+## 📂 Project Structure
+
+```text
+/
+├── project/
+│   ├── backend/
+│   │   ├── orchestrator/      # LangGraph logic (Triage, Workflow, Agents)
+│   │   ├── chat_executor.py   # RAG + Sandbox execution
+│   │   ├── main.py            # FastAPI API & WebSocket Endpoints
+│   │   ├── repo_ingestion.py  # Git -> ChromaDB indexing
+│   │   ├── verifier.py        # Playwright telemetry capture
+│   │   └── requirements.txt   # Backend dependencies (inc. GitPython, pytest-html)
+│   ├── frontend/              # Vite + React 18
+│   │   ├── src/
+│   │   │   ├── components/    # (RepoConfigurator, TestGeneratorChat)
+│   │   │   ├── App.jsx        # Navigation + Reports Tab + Pipeline Stream
+│   │   │   └── index.css      # Design System (Glassmorphism / Dark Mode)
+│   ├── generated_tests/       # [ROOT PERSISTENCE] Execution reports
+│   ├── .env                   # Mistral & GitHub API Keys
+│   └── start-local.ps1        # One-click local startup script
+├── safest/                    # Python VENV (Workspace Root)
+└── build-data.md              # [THIS FILE] Context handover
+```
+
+---
+
+## ⚡ Development & Execution
+
+- **Local Startup**: Run `D:\multi_agent_testing_framework_prod\project\start-local.ps1` from PowerShell. It handles VENV activation and absolute path resolution.
+- **Pipelines**:
+  - **Backend**: `http://localhost:8000`
+  - **Frontend**: `http://localhost:5173`
+  - **Grafana**: `http://localhost:3001/dashboards`
+- **Dependencies**: Ensure the `safest` virtual environment is active before running terminal commands.
+
+---
+
+## 🐞 Critical Bugfixes Applied
+- **Premature WS Close**: Fixed `chat_executor` prematurely sending `done` before the healing pipeline could finish streaming.
+- **Tab State**: Replaced conditional rendering with CSS `display: none` in `App.jsx` to preserve active WebSocket connections and terminal scroll positions.
+- **WebSocketDisconnect**: Added robust backend handling for early client disconnections to prevent `RuntimeError`.
+
+---
+
+## 🔮 Future Roadmap Suggestions
+1. **Multi-Agent Coding**: Allow the chat agent to modify physical files in a project instead of just a sandbox.
+2. **Visual Diffing**: Capture screenshots on failure and use a Vision LLM for UI regression diagnosis.
+3. **CI/CD Integration**: A CLI tool to run the healing pipeline as a GitHub Action.
